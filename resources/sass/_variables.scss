@@ -1,7 +1,94 @@
-// Body
-$body-bg: #f8fafc;
+// ---------------------------------------------------------------------------
+// ADMS — Bootstrap 5 theme variables
+// Enterprise attendance-management palette inspired by ZKTeco BioTime
+// ---------------------------------------------------------------------------
 
 // Typography
-$font-family-sans-serif: 'Nunito', sans-serif;
-$font-size-base: 0.9rem;
-$line-height-base: 1.6;
+$font-family-sans-serif: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue',
+    Arial, sans-serif;
+$font-size-base: 0.875rem; // 14px — dense enterprise density
+$line-height-base: 1.5;
+
+// Brand / primary
+$primary: #0d6efd;
+$primary-hover: #0b5ed7;
+$primary-active: #0a58ca;
+$primary-rgb: 13, 110, 253;
+
+// Surfaces
+$body-bg: #f4f6f9;
+$body-color: #3b4252;
+$secondary: #6b7280;
+
+// Borders / cards
+$border-color: #e4e7ec;
+$border-color-translucent: rgba(27, 37, 50, 0.08);
+$card-bg: #ffffff;
+$card-border-color: #e4e7ec;
+$card-cap-bg: #f8f9fb;
+$border-radius: 0.5rem;
+$border-radius-sm: 0.375rem;
+$border-radius-lg: 0.625rem;
+
+// Shadows
+$enable-shadows: true;
+$box-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+$box-shadow: 0 1px 3px rgba(16, 24, 40, 0.08);
+
+// Tables
+$table-font-size: 0.85rem;
+$table-cell-padding-y: 0.55rem;
+$table-cell-padding-x: 0.75rem;
+$table-cell-padding-y-sm: 0.4rem;
+$table-cell-padding-x-sm: 0.6rem;
+$table-hover-bg: #f1f5f9;
+$table-border-color: #e8ebef;
+
+// Navbar / header
+$navbar-light-color: #4b5563;
+$navbar-light-hover-color: #111827;
+
+// Buttons
+$btn-font-size: 0.85rem;
+$btn-font-size-sm: 0.78rem;
+$btn-border-radius: 0.375rem;
+$btn-border-radius-sm: 0.3125rem;
+$btn-padding-x: 0.9rem;
+$btn-padding-y: 0.45rem;
+$btn-padding-x-sm: 0.6rem;
+$btn-padding-y-sm: 0.3rem;
+
+// Forms
+$input-font-size: 0.85rem;
+$input-border-color: #d3d9e0;
+$input-border-radius: 0.375rem;
+$input-focus-border-color: #86b7fe;
+$form-select-border-color: #d3d9e0;
+$form-select-border-radius: 0.375rem;
+$form-check-input-checked-bg-color: $primary;
+$form-check-input-checked-border-color: $primary;
+
+// Modals
+$modal-content-border-color: transparent;
+$modal-content-border-radius: 0.625rem;
+$modal-inner-padding: 1.1rem;
+$modal-header-padding-y: 0.9rem;
+$modal-header-padding-x: 1.1rem;
+$modal-footer-margin-between: 0.5rem;
+
+// Dropdowns
+$dropdown-border-radius: 0.5rem;
+$dropdown-box-shadow: 0 10px 30px rgba(16, 24, 40, 0.12);
+$dropdown-link-color: #3b4252;
+$dropdown-link-hover-bg: #f1f5f9;
+
+// Pagination
+$pagination-font-size: 0.82rem;
+$pagination-padding-y: 0.4rem;
+$pagination-padding-x: 0.65rem;
+
+// Status (consistent with Bootstrap defaults)
+$success: #198754;
+$warning: #ffc107;
+$danger: #dc3545;
+$info: #0dcaf0;

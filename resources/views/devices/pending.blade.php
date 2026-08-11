@@ -1,18 +1,19 @@
 @extends('layouts.app')
 
 @section('content')
-    <div class="container">
-        <h2>{{ $lable }}</h2>
-        <p class="text-muted">Devices that contacted the server but are not yet assigned to a company/area. Assign them to start accepting their data.</p>
+@include('layouts.partials.page-header', [
+    'title' => $lable,
+    'subtitle' => 'Devices that contacted the server but are not yet assigned to a company/area. Assign them to start accepting their data.',
+])
 
-        @if(session('success'))
-            <div class="alert alert-success">{{ session('success') }}</div>
-        @endif
-        <hr>
-
-        <form method="GET" action="{{ route('devices.pending') }}" class="row mb-3">
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-funnel me-1"></i>Filters
+    </div>
+    <div class="card-body">
+        <form method="GET" action="{{ route('devices.pending') }}" class="row g-2 align-items-center">
             <div class="col-md-4">
-                <select name="state" class="form-control">
+                <select name="state" class="form-select">
                     <option value="">All States</option>
                     <option value="detected" @selected(request('state') === 'detected')>Detected</option>
                     <option value="assigned" @selected(request('state') === 'assigned')>Assigned</option>
@@ -20,12 +21,26 @@
                     <option value="ignored" @selected(request('state') === 'ignored')>Ignored</option>
                 </select>
             </div>
-            <div class="col-md-4">
-                <button type="submit" class="btn btn-primary">Filter</button>
+            <div class="col-md-4 d-flex gap-2">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-funnel me-1"></i>Filter
+                </button>
+                @if(request('state'))
+                    <a href="{{ route('devices.pending') }}" class="btn btn-light">
+                        <i class="bi bi-x-lg me-1"></i>Clear
+                    </a>
+                @endif
             </div>
         </form>
+    </div>
+</div>
 
-        <table class="table table-bordered">
+<div class="card table-section">
+    <div class="card-header">
+        <i class="bi bi-table me-1"></i>Pending Devices
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover table-bordered" id="pendingDevicesTable">
             <thead>
                 <tr>
                     <th>Serial Number</th>
@@ -34,91 +49,196 @@
                     <th>First Seen</th>
                     <th>Last Seen</th>
                     <th>State</th>
-                    <th>Actions</th>
+                    <th class="text-end">Actions</th>
                 </tr>
             </thead>
             <tbody>
-                @forelse ($log as $d)
+                @forelse($log as $d)
                     <tr>
-                        <td>{{ $d->sn }}</td>
-                        <td>{{ $d->ip_address ?? '-' }}</td>
+                        <td><span class="badge text-bg-light border">{{ $d->sn }}</span></td>
+                        <td><span class="font-monospace small">{{ $d->ip_address ?? '-' }}</span></td>
                         <td>{{ $d->model ?? '-' }}</td>
-                        <td>{{ $d->first_seen }}</td>
-                        <td>{{ $d->last_seen }}</td>
+                        <td class="small">{{ $d->first_seen }}</td>
+                        <td class="small">{{ $d->last_seen }}</td>
                         <td>
-                            @if($d->state === 'detected')
-                                <span class="badge bg-warning text-dark">Detected</span>
-                            @elseif($d->state === 'assigned')
-                                <span class="badge bg-success">Assigned</span>
-                            @elseif($d->state === 'blocked')
-                                <span class="badge bg-danger">Blocked</span>
-                            @else
-                                <span class="badge bg-secondary">Ignored</span>
-                            @endif
+                            @include('layouts.partials.status-badge', ['status' => $d->state])
                         </td>
-                        <td>
+                        <td class="text-end">
                             @if($d->state === 'detected')
-                                <button class="btn btn-sm btn-primary" data-bs-toggle="modal"
-                                    data-bs-target="#assignDevice{{ $d->id }}">Assign</button>
-                                <form action="{{ route('devices.ignorePending', $d->id) }}" method="POST" class="d-inline">
-                                    @csrf
-                                    <button type="submit" class="btn btn-sm btn-secondary">Ignore</button>
-                                </form>
+                                <div class="table-row-actions justify-content-end">
+                                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
+                                        data-bs-target="#assignDevice{{ $d->id }}">
+                                        <i class="bi bi-link-45deg"></i> Assign
+                                    </button>
+                                    <form action="{{ route('devices.ignorePending', $d->id) }}" method="POST"
+                                        data-confirm="Ignore this device?">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                            <i class="bi bi-slash-circle"></i> Ignore
+                                        </button>
+                                    </form>
+                                </div>
+                            @elseif($d->state === 'assigned')
+                                <div class="table-row-actions justify-content-end">
+                                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
+                                        data-bs-target="#editDevice{{ $d->id }}">
+                                        <i class="bi bi-pencil"></i> Edit
+                                    </button>
+                                    <form action="{{ route('devices.disablePending', $d->id) }}" method="POST"
+                                        data-confirm="Disable this device?">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-warning">
+                                            <i class="bi bi-stop-circle"></i> Disable
+                                        </button>
+                                    </form>
+                                    <form action="{{ route('devices.unassignPending', $d->id) }}" method="POST"
+                                        data-confirm="Unassign this device? It will be removed and returned to detected.">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-unlink"></i> Unassign
+                                        </button>
+                                    </form>
+                                </div>
+                            @elseif($d->state === 'blocked')
+                                <div class="table-row-actions justify-content-end">
+                                    <form action="{{ route('devices.enablePending', $d->id) }}" method="POST"
+                                        data-confirm="Enable this device?">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-success">
+                                            <i class="bi bi-play-circle"></i> Enable
+                                        </button>
+                                    </form>
+                                    <form action="{{ route('devices.unassignPending', $d->id) }}" method="POST"
+                                        data-confirm="Unassign this device? It will be removed and returned to detected.">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-unlink"></i> Unassign
+                                        </button>
+                                    </form>
+                                </div>
+                            @elseif($d->state === 'ignored')
+                                <div class="table-row-actions justify-content-end">
+                                    <form action="{{ route('devices.redetectPending', $d->id) }}" method="POST"
+                                        data-confirm="Re-detect this device?">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-info">
+                                            <i class="bi bi-search"></i> Re-detect
+                                        </button>
+                                    </form>
+                                </div>
                             @else
                                 <span class="text-muted">-</span>
                             @endif
                         </td>
                     </tr>
-
-                    <div class="modal fade" id="assignDevice{{ $d->id }}" tabindex="-1" aria-hidden="true">
-                        <div class="modal-dialog">
-                            <div class="modal-content">
-                                <form action="{{ route('devices.assignPending') }}" method="POST">
-                                    @csrf
-                                    <input type="hidden" name="sn" value="{{ $d->sn }}">
-                                    <div class="modal-header">
-                                        <h5 class="modal-title">Assign Device {{ $d->sn }}</h5>
-                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                                    </div>
-                                    <div class="modal-body">
-                                        <div class="mb-3">
-                                            <label class="form-label">Company</label>
-                                            <select name="company_id" class="form-control" required>
-                                                <option value="">-- Select Company --</option>
-                                                @foreach($companies as $company)
-                                                    <option value="{{ $company->id }}" @selected(current_company_id() === $company->id)>{{ $company->name }}</option>
-                                                @endforeach
-                                            </select>
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label">Area</label>
-                                            <select name="area_id" class="form-control area-select">
-                                                <option value="">-- None --</option>
-                                                @foreach($areas as $area)
-                                                    <option value="{{ $area->id }}" data-company="{{ $area->company_id }}" @if(str_starts_with($area->name, 'Default')) data-default="1" @endif>{{ $area->name }}</option>
-                                                @endforeach
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                                        <button type="submit" class="btn btn-primary">Assign</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
                 @empty
-                    <tr>
-                        <td colspan="7" class="text-center">No pending devices.</td>
+                    <tr data-empty-row>
+                        <td colspan="7">
+                            @include('layouts.partials.empty-state', [
+                                'icon' => 'bi-usb-plug',
+                                'title' => 'No pending devices',
+                            ])
+                        </td>
                     </tr>
                 @endforelse
             </tbody>
         </table>
-        <div class="pagination">
+    </div>
+    @if($log->hasPages())
+        <div class="pagination-wrapper">
             {{ $log->links('pagination::bootstrap-5') }}
         </div>
+    @endif
+</div>
+
+@foreach($log as $d)
+    <div class="modal fade" id="assignDevice{{ $d->id }}" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="{{ route('devices.assignPending') }}" method="POST">
+                    @csrf
+                    <input type="hidden" name="sn" value="{{ $d->sn }}">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Assign Device {{ $d->sn }}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Company <span class="required-mark">*</span></label>
+                            <select name="company_id" class="form-select" required>
+                                <option value="">-- Select Company --</option>
+                                @foreach($companies as $company)
+                                    <option value="{{ $company->id }}" @selected(current_company_id() === $company->id)>{{ $company->name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Area</label>
+                            <select name="area_id" class="form-select area-select">
+                                <option value="">-- None --</option>
+                                @foreach($areas as $area)
+                                    <option value="{{ $area->id }}" data-company="{{ $area->company_id }}" @if(str_starts_with($area->name, 'Default')) data-default="1" @endif>{{ $area->name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-lg me-1"></i>Assign
+                        </button>
+                    </div>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
+@endforeach
+
+@foreach($log as $d)
+    @if($d->state === 'assigned')
+        <div class="modal fade" id="editDevice{{ $d->id }}" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <form action="{{ route('devices.assignPending') }}" method="POST">
+                        @csrf
+                        <input type="hidden" name="sn" value="{{ $d->sn }}">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Re-assign Device {{ $d->sn }}</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label">Company <span class="required-mark">*</span></label>
+                                <select name="company_id" class="form-select" required>
+                                    <option value="">-- Select Company --</option>
+                                    @foreach($companies as $company)
+                                        <option value="{{ $company->id }}" @selected($d->device_company_id === $company->id)>{{ $company->name }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Area</label>
+                                <select name="area_id" class="form-select area-select">
+                                    <option value="">-- None --</option>
+                                    @foreach($areas as $area)
+                                        <option value="{{ $area->id }}" data-company="{{ $area->company_id }}" @selected($d->device_area_id === $area->id) @if(str_starts_with($area->name, 'Default')) data-default="1" @endif>{{ $area->name }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-lg me-1"></i>Save
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    @endif
+@endforeach
 @endsection
 
 @section('scripts')
@@ -150,6 +270,7 @@
             }
 
             companySelect.addEventListener('change', filterAreas);
+            modal.addEventListener('show.bs.modal', filterAreas);
         });
     });
 </script>

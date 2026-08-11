@@ -36,4 +36,11 @@ class Schedule extends Model
     {
         return $this->belongsTo(Department::class);
     }
+
+    public function employees()
+    {
+        return $this->belongsToMany(Employee::class, 'employee_schedule')
+            ->withPivot(['company_id', 'effective_from', 'effective_to'])
+            ->withTimestamps();
+    }
 }

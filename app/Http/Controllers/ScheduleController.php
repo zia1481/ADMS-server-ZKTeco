@@ -43,7 +43,7 @@ class ScheduleController extends Controller
             'name' => $request->name,
             'shift_id' => $request->shift_id,
             'department_id' => $request->department_id,
-            'working_days' => $request->working_days ?? [],
+            'working_days' => $this->normalizeWorkingDays($request->working_days),
             'effective_from' => $request->effective_from,
             'effective_to' => $request->effective_to,
             'is_active' => $request->boolean('is_active', true),
@@ -70,7 +70,7 @@ class ScheduleController extends Controller
             'name' => $request->name,
             'shift_id' => $request->shift_id,
             'department_id' => $request->department_id,
-            'working_days' => $request->working_days ?? [],
+            'working_days' => $this->normalizeWorkingDays($request->working_days),
             'effective_from' => $request->effective_from,
             'effective_to' => $request->effective_to,
             'is_active' => $request->boolean('is_active'),
@@ -86,6 +86,11 @@ class ScheduleController extends Controller
         $schedule->delete();
 
         return redirect()->route('schedules.index')->with('success', 'Schedule deleted successfully');
+    }
+
+    protected function normalizeWorkingDays($days): array
+    {
+        return array_map('intval', $days ?? []);
     }
 
     protected function resolveCompanyId(Request $request): int

@@ -23,7 +23,7 @@ class UserController extends Controller
             $query->where('company_id', $user->company_id);
         }
 
-        $users = $query->get()->filter(function ($item) use ($user) {
+        $users = $query->with('company')->get()->filter(function ($item) use ($user) {
             return $item->id != $user->id;
         });
 
@@ -73,23 +73,55 @@ class UserController extends Controller
         }
     }
 
-    public function destroy($id)
+    public function toggleActive($id)
     {
-        if (Auth::user()->isSuperAdmin()) {
-            $user = User::find($id);
-            if ($user) {
-                $user->delete();
-            }
-            return redirect()->route('users.index')->with('success', 'User deleted successfully');
+        $user = User::find($id);
+
+        if (!$user) {
+            return redirect()->route('users.index')->with('failed', 'User not found');
         }
+
+        if ($user->id === Auth::user()->id) {
+            return redirect()->route('users.index')->with('failed', 'You cannot disable your own account');
+        }
+
+        if (!Auth::user()->isSuperAdmin() && $user->company_id !== Auth::user()->company_id) {
+            return redirect()->route('users.index')->with('failed', 'Failed to update user');
+        }
+
+        $user->is_active = !$user->is_active;
+        $user->save();
+
+        $action = $user->is_active ? 'enabled' : 'disabled';
+
+        return redirect()->route('users.index')->with('success', "User {$action} successfully");
+    }
+
+    public function resetPassword(Request $request, $id)
+    {
+        $request->validate([
+            'password' => 'required|string|min:4|confirmed',
+        ]);
 
         $user = User::find($id);
-        if ($user && $user->company_id === Auth::user()->company_id) {
-            $user->delete();
-            return redirect()->route('users.index')->with('success', 'User deleted successfully');
+
+        if (!$user) {
+            return redirect()->route('users.index')->with('failed', 'User not found');
         }
 
-        return redirect()->route('users.index')->with('failed', 'Failed to delete user');
+        if (!Auth::user()->isSuperAdmin() && $user->company_id !== Auth::user()->company_id) {
+            return redirect()->route('users.index')->with('failed', 'Failed to reset password');
+        }
+
+        try {
+            $user->password = Hash::make($request->password);
+            $user->force_to_change_password = true;
+            $user->save();
+
+            return redirect()->route('users.index')->with('success', 'Password reset successfully. The user must change it on next login.');
+        } catch (\Exception $e) {
+            return redirect()->route('users.index')->with('failed', 'Failed to reset password');
+        }
     }
 
     public function showChangePasswordForm()

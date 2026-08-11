@@ -1,47 +1,65 @@
 @extends('layouts.app')
 
 @section('content')
-<div class="container">
-    <h1>Attendance</h1>
+@include('layouts.partials.page-header', [
+    'title' => 'Attendance Records',
+    'subtitle' => 'View raw attendance transactions captured from devices.',
+])
 
- <div class="row mb-3">
-    <div class="col-md-3">
-        <input type="date" id="start_date" class="form-control" placeholder="Start Date">
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-funnel me-1"></i>Filters
     </div>
-    <div class="col-md-3">
-        <input type="date" id="end_date" class="form-control" placeholder="End Date">
-    </div>
-    <div class="col-md-3">
-        <input type="text" id="employee_id_search" class="form-control" placeholder="Search Employee ID">
-    </div>
-    <div class="col-md-3">
-        <input type="text" id="employee_name_search" class="form-control" placeholder="Search Employee Name">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <label class="form-label">Start Date</label>
+                <input type="date" id="start_date" class="form-control">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">End Date</label>
+                <input type="date" id="end_date" class="form-control">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Employee ID</label>
+                <input type="text" id="employee_id_search" class="form-control" placeholder="Search Employee ID">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Employee Name</label>
+                <input type="text" id="employee_name_search" class="form-control" placeholder="Search Employee Name">
+            </div>
+        </div>
+        <div class="d-flex justify-content-end mt-3">
+            <button id="filter_button" class="btn btn-primary">
+                <i class="bi bi-funnel me-1"></i>Filter
+            </button>
+        </div>
     </div>
 </div>
-<div class="d-flex justify-content-end">
-        <button id="filter_button" class="btn btn-primary w-25">Filter</button>
-</div>
 
-    <table class="table table-bordered" id="attendanceTable">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>SN</th>
-                <th>Employee ID</th>
-                <th>Employee Name</th>
-                <th>Timestamp</th>
-                <th>Status</th>
-                <th>Type</th>
-            </tr>
-        </thead>
-    </table>
+<div class="card table-section">
+    <div class="card-header">
+        <i class="bi bi-table me-1"></i>Transactions
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover table-bordered" id="attendanceTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>SN</th>
+                    <th>Employee ID</th>
+                    <th>Employee Name</th>
+                    <th>Timestamp</th>
+                    <th>Status</th>
+                    <th>Type</th>
+                </tr>
+            </thead>
+        </table>
+    </div>
 </div>
 @endsection
 
-
-@section('scripts') 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-
+@section('scripts')
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const today = new Date().toISOString().split('T')[0];
@@ -66,7 +84,7 @@ $(document).ready(function () {
                 d.employee_name = $('#employee_name_search').val();
             }
         },
-        dom: '<"row"<"col-md-6"i><"col-md-6"f>>t<"row"<"col-md-6"B><"col-md-6"p>>',
+        dom: '<"row"<"col-sm-12 col-md-6"i><"col-sm-12 col-md-6 text-md-end"B>>t<"row mt-2"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6 text-md-end"p>>',
         buttons: [
             'excel', 'pdf', 'print', 'pageLength'
         ],
@@ -98,16 +116,19 @@ $(document).ready(function () {
                 data: 'status1',
                 name: 'status1',
                 render: function (data, type, row) {
-                    return data == 1 ? 'Out' : 'In';
+                    var label = data == 1 ? 'out' : 'in';
+                    return '<span class="badge text-bg-' + (data == 1 ? 'secondary' : 'info') + ' badge-soft">' +
+                        '<i class="bi ' + (data == 1 ? 'bi-box-arrow-right' : 'bi-box-arrow-in-right') + '"></i>' +
+                        (data == 1 ? 'Out' : 'In') + '</span>';
                 }
             },
             {
                 data: 'status2',
                 name: 'status2',
                 render: function (data, type, row) {
-                    if (data == 15) return 'Face';
-                    if (data == 25) return 'Palm';
-                    else return data;
+                    if (data == 15) return '<span class="badge text-bg-light border">Face</span>';
+                    if (data == 25) return '<span class="badge text-bg-light border">Palm</span>';
+                    return data;
                 }
             },
         ],

@@ -30,6 +30,10 @@ class iclockController extends Controller
             }
 
             DB::table('devices')->where('no_sn', $sn)->update(['online' => now()]);
+
+            if (!$device->company_id) {
+                $this->detectNewDevice($request);
+            }
         } else {
             $this->detectNewDevice($request);
         }
@@ -59,6 +63,10 @@ class iclockController extends Controller
 
         if ($device && $device->status === 'blocked') {
             return "ERROR: 0";
+        }
+
+        if ($device && !$device->company_id) {
+            $this->detectNewDevice($request);
         }
 
         try {
@@ -134,6 +142,10 @@ class iclockController extends Controller
 
         if ($device) {
             DB::table('devices')->where('no_sn', $sn)->update(['online' => now()]);
+
+            if (!$device->company_id) {
+                $this->detectNewDevice($request);
+            }
         } else {
             $this->detectNewDevice($request);
         }

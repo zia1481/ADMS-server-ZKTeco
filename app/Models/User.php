@@ -22,7 +22,8 @@ class User extends Authenticatable
         'is_admin',
         'role',
         'company_id',
-        'force_to_change_password'
+        'force_to_change_password',
+        'is_active'
     ];
 
     protected $hidden = [
@@ -33,6 +34,7 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
+        'is_active' => 'boolean',
     ];
 
     public function company()

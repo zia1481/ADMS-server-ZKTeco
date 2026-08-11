@@ -7,7 +7,9 @@ use Carbon\Carbon;
 use App\Models\Area;
 use App\Models\Company;
 use App\Models\Device;
+use App\Models\Employee;
 use App\Models\PendingDevice;
+use App\Services\AttendanceStatusService;
 
 class DeviceController extends Controller
 {
@@ -87,14 +89,20 @@ class DeviceController extends Controller
 
     public function pending(Request $request)
     {
-        $query = DB::table('pending_devices');
+        $query = DB::table('pending_devices')
+            ->leftJoin('devices', 'devices.no_sn', '=', 'pending_devices.sn')
+            ->select(
+                'pending_devices.*',
+                'devices.company_id as device_company_id',
+                'devices.area_id as device_area_id'
+            );
 
         if ($request->filled('state')) {
-            $query->where('state', $request->state);
+            $query->where('pending_devices.state', $request->state);
         }
 
         $data['lable'] = "Pending Devices";
-        $data['log'] = $query->orderBy('last_seen', 'DESC')->paginate(10)->withQueryString();
+        $data['log'] = $query->orderBy('pending_devices.last_seen', 'DESC')->paginate(10)->withQueryString();
         $data['companies'] = Company::orderBy('name')->get();
         $data['areas'] = Area::with('company')->orderBy('name')->get();
 
@@ -155,6 +163,57 @@ class DeviceController extends Controller
         $pending->update(['state' => PendingDevice::STATE_IGNORED]);
 
         return redirect()->route('devices.pending')->with('success', 'Device ignored');
+    }
+
+    public function unassignPending(Request $request, $id)
+    {
+        $pending = PendingDevice::findOrFail($id);
+
+        if (!in_array($pending->state, [PendingDevice::STATE_ASSIGNED, PendingDevice::STATE_BLOCKED])) {
+            return redirect()->route('devices.pending')->with('failed', 'Only assigned devices can be unassigned');
+        }
+
+        DB::table('devices')->where('no_sn', $pending->sn)->delete();
+        $pending->update(['state' => PendingDevice::STATE_DETECTED]);
+
+        return redirect()->route('devices.pending')->with('success', 'Device unassigned and back to detected');
+    }
+
+    public function disablePending(Request $request, $id)
+    {
+        $pending = PendingDevice::findOrFail($id);
+
+        DB::table('devices')->where('no_sn', $pending->sn)->update(['status' => Device::STATUS_BLOCKED]);
+        $pending->update(['state' => PendingDevice::STATE_BLOCKED]);
+
+        return redirect()->route('devices.pending')->with('success', 'Device disabled');
+    }
+
+    public function enablePending(Request $request, $id)
+    {
+        $pending = PendingDevice::findOrFail($id);
+
+        if ($pending->state !== PendingDevice::STATE_BLOCKED) {
+            return redirect()->route('devices.pending')->with('failed', 'Only blocked devices can be enabled');
+        }
+
+        DB::table('devices')->where('no_sn', $pending->sn)->update(['status' => Device::STATUS_REGISTERED]);
+        $pending->update(['state' => PendingDevice::STATE_ASSIGNED]);
+
+        return redirect()->route('devices.pending')->with('success', 'Device enabled');
+    }
+
+    public function redetectPending(Request $request, $id)
+    {
+        $pending = PendingDevice::findOrFail($id);
+
+        if ($pending->state !== PendingDevice::STATE_IGNORED) {
+            return redirect()->route('devices.pending')->with('failed', 'Only ignored devices can be re-detected');
+        }
+
+        $pending->update(['state' => PendingDevice::STATE_DETECTED]);
+
+        return redirect()->route('devices.pending')->with('success', 'Device re-detected');
     }
 
     public function DeviceLog(Request $request)
@@ -246,11 +305,9 @@ class DeviceController extends Controller
         $endOfDay = $date->copy()->endOfDay();
 
         // Query to get all employees
-        $employees = DB::table('employees')
-            ->when($companyId, function ($query, $companyId) {
-                return $query->where('company_id', $companyId);
-            })
-            ->select('employee_id', 'name')
+        $employees = Employee::forCompany($companyId)
+            ->with('department', 'schedules')
+            ->select('id', 'company_id', 'department_id', 'employee_id', 'name')
             ->get();
 
         // Query to get attendance data for the specified date
@@ -268,13 +325,17 @@ class DeviceController extends Controller
             ->get()
             ->keyBy('employee_id');
 
+        $statusService = app(AttendanceStatusService::class);
+
         // Prepare the attendance summary
-        $attendanceSummary = $employees->map(function ($employee) use ($attendanceData) {
+        $attendanceSummary = $employees->map(function ($employee) use ($attendanceData, $statusService, $date) {
 
             $attendance = $attendanceData->get($employee->employee_id);
             $firstIn = $attendance && $attendance->first_in ? Carbon::parse($attendance->first_in) : null;
             $lastOut = $attendance && $attendance->last_out ? Carbon::parse($attendance->last_out) : null;
             $totalTime = ($firstIn && $lastOut) ? sprintf('%02d:%02d', $firstIn->diffInHours($lastOut), $firstIn->diffInMinutes($lastOut) % 60) : 'N/A';
+
+            $result = $statusService->statusFor($employee, $date, $firstIn, $lastOut);
 
             return [
                 'employee_id' => $employee->employee_id,
@@ -282,6 +343,9 @@ class DeviceController extends Controller
                 'first_in' => $firstIn ? $firstIn->format('d/m/Y, h:i A') : 'No Checkin', // Show N/A if first_in is null
                 'last_out' => $lastOut ? $lastOut->format('d/m/Y, h:i A') : 'No Checkout', // Show N/A if last_out is null
                 'total_time' => $totalTime,
+                'scheduled_in' => $result['scheduled_in'] ? $result['scheduled_in']->format('h:i A') : '-',
+                'scheduled_out' => $result['scheduled_out'] ? $result['scheduled_out']->format('h:i A') : '-',
+                'status' => $result['status'],
             ];
         });
         return response()->json([
@@ -312,10 +376,8 @@ class DeviceController extends Controller
         $startDate = Carbon::parse($startDate)->startOfDay();
         $endDate = Carbon::parse($endDate)->endOfDay();
         // Find the employee
-        $employee = DB::table('employees')
-            ->when($companyId, function ($query, $companyId) {
-                return $query->where('company_id', $companyId);
-            })
+        $employee = Employee::forCompany($companyId)
+            ->with('department', 'schedules')
             ->where(function ($query) use ($employeeId, $employeeName) {
                 if ($employeeId) {
                     $query->where('employee_id', $employeeId);
@@ -343,11 +405,16 @@ class DeviceController extends Controller
             ->whereBetween('timestamp', [$startDate, $endDate])
             ->groupBy(DB::raw('DATE(timestamp)'))
             ->get();
+        $statusService = app(AttendanceStatusService::class);
+
         // Prepare the result
-        $result = $attendanceData->map(function ($record) use ($employee) {
+        $result = $attendanceData->map(function ($record) use ($employee, $statusService) {
             $firstIn = $record->first_in ? Carbon::parse($record->first_in) : null;
             $lastOut = $record->last_out ? Carbon::parse($record->last_out) : null;
             $totalTime = ($firstIn && $lastOut) ? $firstIn->diff($lastOut)->format('%H:%I') : 'N/A';
+
+            $statusResult = $statusService->statusFor($employee, Carbon::parse($record->date), $firstIn, $lastOut);
+
             return [
                 'employee_id' => $employee->employee_id,
                 'employee_name' => $employee->name,
@@ -355,6 +422,9 @@ class DeviceController extends Controller
                 'first_in' => $firstIn ? $firstIn->format('h:i A') : '-',
                 'last_out' => $lastOut ? $lastOut->format('h:i A') : '-',
                 'total_hours' => $totalTime,
+                'scheduled_in' => $statusResult['scheduled_in'] ? $statusResult['scheduled_in']->format('h:i A') : '-',
+                'scheduled_out' => $statusResult['scheduled_out'] ? $statusResult['scheduled_out']->format('h:i A') : '-',
+                'status' => $statusResult['status'],
             ];
         });
         return response()->json(['data' => $result]);
