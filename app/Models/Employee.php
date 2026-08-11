@@ -7,18 +7,25 @@ use Illuminate\Database\Eloquent\Model;
 
 class Employee extends Model
 {
-    use HasFactory;
+    use HasFactory, BelongsToCompany;
 
     protected $fillable = [
+        'company_id',
+        'department_id',
         'employee_id',
         'name',
+        'email',
+        'phone',
+        'position',
     ];
 
-    /**
-     * Get the attendance records for the employee.
-     */
     public function attendances()
     {
-        return $this->hasMany(Attendance::class, 'id', 'employee_id');
+        return $this->hasMany(Attendance::class, 'employee_id', 'employee_id');
+    }
+
+    public function department()
+    {
+        return $this->belongsTo(Department::class);
     }
 }

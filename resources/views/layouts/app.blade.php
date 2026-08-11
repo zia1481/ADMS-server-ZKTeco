@@ -71,18 +71,43 @@
                         <li class="nav-item">
                             <a class="nav-link" href="{{ route('devices.monthly') }}">Monthly</a>
                         </li>
-                        <!-- if is_admin is true then show this link -->
-                        @if (Auth::user()->is_admin)
+                        @if (Auth::user()->isSuperAdmin())
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('dashboard.super-admin') }}">Dashboard</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('companies.index') }}">Companies</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('devices.pending') }}">New Devices</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('users.index') }}">Users</a>
+                            </li>
+                        @endif
+                        @if (Auth::user()->isCompanyAdmin())
                             <li class="nav-item">
                                 <a class="nav-link" href="{{ route('devices.index') }}">Devices</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" href="{{ route('users.index') }}">Admins</a>
+                                <a class="nav-link" href="{{ route('areas.index') }}">Areas</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" href="{{ route('employee.MapId') }}">Map Employee Name</a>
+                                <a class="nav-link" href="{{ route('departments.index') }}">Departments</a>
                             </li>
-                        @endif                      
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('shifts.index') }}">Shifts</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('schedules.index') }}">Schedules</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('employees.index') }}">Employees</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('users.index') }}">Users</a>
+                            </li>
+                        @endif
                         <li class="nav-item">
                             <a class="nav-link" href="{{ route('password.change') }}">Change Password</a>
                         </li>
@@ -92,6 +117,30 @@
             <span class="navbar-text d-none d-lg-block">
                 <ul class="navbar-nav ms-auto">
                     @if (Auth::check())
+                        @if (Auth::user()->isSuperAdmin())
+                            <li class="nav-item dropdown">
+                                <a id="companyDropdown" class="nav-link dropdown-toggle" href="#" role="button"
+                                    data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" v-pre>
+                                    {{ \App\Helpers\CompanyHelper::currentCompanyName() }}
+                                </a>
+                                <div class="dropdown-menu dropdown-menu-end" aria-labelledby="companyDropdown">
+                                    <form action="{{ route('companies.switch', 0) }}" method="POST" class="d-none" id="company-all-form">
+                                        @csrf
+                                    </form>
+                                    <button type="button" class="dropdown-item" onclick="event.preventDefault(); document.getElementById('company-all-form').submit();">
+                                        All Companies
+                                    </button>
+                                    @foreach (\App\Models\Company::orderBy('name')->get() as $company)
+                                        <form action="{{ route('companies.switch', $company->id) }}" method="POST" class="d-none" id="company-form-{{ $company->id }}">
+                                            @csrf
+                                        </form>
+                                        <button type="button" class="dropdown-item" onclick="event.preventDefault(); document.getElementById('company-form-{{ $company->id }}').submit();">
+                                            {{ $company->name }}
+                                        </button>
+                                    @endforeach
+                                </div>
+                            </li>
+                        @endif
                         <!-- Authentication Links -->
                         <li class="nav-item dropdown">
                             <a id="navbarDropdown" class="nav-link dropdown-toggle" href="#" role="button"

@@ -54,7 +54,7 @@
             },
             dom: '<"row"<"col-md-6"l><"col-md-6"f>>rtip<"row"<"col-md-6"B>>',
             buttons: [
-                'excel', 'pdf', 'csv'
+                'excel', 'pdf', 'csv', 'print'
             ],
             columns: [
                 { data: 'employee_id', name: 'employee_id' },

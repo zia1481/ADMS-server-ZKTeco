@@ -4,59 +4,190 @@ use Yajra\DataTables\Facades\DataTables;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Models\Area;
+use App\Models\Company;
+use App\Models\Device;
+use App\Models\PendingDevice;
+
 class DeviceController extends Controller
 {
     const MAJOR = 1;
     const MINOR = 2;
     const PATCH = 3;
-    
+
     public static function get()
     {
         $commitHash = trim(exec('git log --pretty="%h" -n1 HEAD'));
-        
+
         $commitDate = new \DateTime(trim(exec('git log -n1 --pretty=%ci HEAD')));
         $commitDate->setTimezone(new \DateTimeZone('UTC'));
-        
+
         return sprintf('v%s.%s.%s-dev.%s (%s)', self::MAJOR, self::MINOR, self::PATCH, $commitHash, $commitDate->format('Y-m-d H:i:s'));
     }
+
     public function index(Request $request)
     {
+        $companyId = current_company_id();
+
+        $query = DB::table('devices')
+            ->leftJoin('companies', 'devices.company_id', '=', 'companies.id')
+            ->leftJoin('areas', 'devices.area_id', '=', 'areas.id')
+            ->select(
+                'devices.id',
+                'devices.nama',
+                'devices.no_sn',
+                'devices.ip_address',
+                'devices.model',
+                'devices.status',
+                'devices.online',
+                'devices.company_id',
+                'devices.area_id',
+                'companies.name as company_name',
+                'areas.name as area_name'
+            )
+            ->orderBy('devices.online', 'DESC');
+
+        if ($companyId) {
+            $query->where('devices.company_id', $companyId);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('devices.status', $request->status);
+        }
+
+        if ($request->filled('search')) {
+            $query->where(function ($q) use ($request) {
+                $q->where('devices.no_sn', 'like', '%' . $request->search . '%')
+                    ->orWhere('devices.nama', 'like', '%' . $request->search . '%');
+            });
+        }
+
         $data['lable'] = "Devices";
-        $data['log'] = DB::table('devices')->select('id', 'no_sn', 'online')->orderBy('online', 'DESC')->get();
+        $data['log'] = $query->paginate(10)->withQueryString();
+        $data['areas'] = Area::forCompany($companyId)->orderBy('name')->get();
+        $data['companies'] = auth()->user()->isSuperAdmin() ? Company::orderBy('name')->get() : collect();
+
         return view('devices.index', $data);
     }
+
+    public function update(Request $request, Device $device)
+    {
+        $this->authorizeCompany($device->company_id);
+
+        $request->validate([
+            'nama' => 'nullable|string|max:255',
+            'area_id' => 'nullable|exists:areas,id',
+            'status' => 'nullable|in:registered,pending,blocked',
+        ]);
+
+        $device->update($request->only(['nama', 'area_id', 'status']));
+
+        return redirect()->route('devices.index')->with('success', 'Device updated successfully');
+    }
+
+    public function pending(Request $request)
+    {
+        $query = DB::table('pending_devices');
+
+        if ($request->filled('state')) {
+            $query->where('state', $request->state);
+        }
+
+        $data['lable'] = "Pending Devices";
+        $data['log'] = $query->orderBy('last_seen', 'DESC')->paginate(10)->withQueryString();
+        $data['companies'] = Company::orderBy('name')->get();
+        $data['areas'] = Area::with('company')->orderBy('name')->get();
+
+        return view('devices.pending', $data);
+    }
+
+    public function assignPending(Request $request)
+    {
+        $request->validate([
+            'sn' => 'required|string|exists:pending_devices,sn',
+            'company_id' => 'required|integer|exists:companies,id',
+            'area_id' => 'nullable|integer|exists:areas,id',
+        ]);
+
+        $pending = PendingDevice::where('sn', $request->sn)->firstOrFail();
+
+        $areaId = $request->area_id;
+        if (!$areaId) {
+            $areaId = Area::where('company_id', $request->company_id)
+                ->where('name', 'like', 'Default%')
+                ->orderBy('id')
+                ->value('id') ?: Area::where('company_id', $request->company_id)->orderBy('id')->value('id');
+        }
+
+        Device::updateOrCreate(
+            ['no_sn' => $pending->sn],
+            [
+                'company_id' => $request->company_id,
+                'area_id' => $areaId,
+                'nama' => $pending->sn,
+                'ip_address' => $pending->ip_address,
+                'model' => $pending->model,
+                'fw_ver' => $pending->fw_ver,
+                'push_ver' => $pending->push_ver,
+                'status' => Device::STATUS_REGISTERED,
+            ]
+        );
+
+        $pending->update(['state' => PendingDevice::STATE_ASSIGNED]);
+
+        // Try to process any records that arrived while the device was pending
+        DB::table('attendance_staging')
+            ->where('sn', $pending->sn)
+            ->whereNull('device_id')
+            ->update([
+                'device_id' => DB::table('devices')->where('no_sn', $pending->sn)->value('id'),
+                'company_id' => $request->company_id,
+            ]);
+
+        \App\Jobs\ProcessAttendanceStaging::dispatch();
+
+        return redirect()->route('devices.pending')->with('success', 'Device assigned successfully');
+    }
+
+    public function ignorePending(Request $request, $id)
+    {
+        $pending = PendingDevice::findOrFail($id);
+        $pending->update(['state' => PendingDevice::STATE_IGNORED]);
+
+        return redirect()->route('devices.pending')->with('success', 'Device ignored');
+    }
+
     public function DeviceLog(Request $request)
     {
         $data['lable'] = "Devices Log";
-        // Specify the number of items per page
         $perPage = 10;
         $data['log'] = DB::table('device_log')->select('id', 'data', 'url')->orderBy('id', 'DESC')->paginate($perPage);
         return view('devices.log', $data);
     }
+
     public function FingerLog(Request $request)
     {
         $data['lable'] = "Finger Log";
-        // Specify the number of items per page
         $perPage = 10;
-        // Paginate the query
         $data['log'] = DB::table('finger_log')
             ->select('id', 'data', 'url')
             ->orderBy('id', 'DESC')
             ->paginate($perPage);
         return view('devices.log', $data);
     }
-    public function MapId(Request $request)
-    {
-        return view('devices.map_id');
-    }
+
     public function Attendance(Request $request)
     {
         return view('devices.attendance');
     }
+
     public function getAttendance(Request $request)
     {
         $query = DB::table('attendances')
-            ->leftJoin('employees', 'attendances.employee_id', '=', 'employees.employee_id')
+            ->leftJoin('employees', function ($join) {
+                $join->on('attendances.employee_id', '=', 'employees.employee_id')
+                    ->on('attendances.company_id', '=', 'employees.company_id');
+            })
             ->select(
                 'attendances.id',
                 'attendances.sn',
@@ -67,6 +198,12 @@ class DeviceController extends Controller
                 'employees.name as employee_name'
             )
             ->orderBy('attendances.timestamp', 'DESC');
+
+        $companyId = current_company_id();
+        if ($companyId) {
+            $query->where('attendances.company_id', $companyId);
+        }
+
         if ($request->filled('start_date')) {
             $query->whereDate('attendances.timestamp', '>=', $request->start_date);
         }
@@ -86,12 +223,16 @@ class DeviceController extends Controller
             })
             ->toJson();
     }
+
     public function daily(Request $request)
     {
         return view('devices.daily');
     }
+
     public function getDailyAttendanceSummary(Request $request)
     {
+        $companyId = current_company_id();
+
         // Determine the date to filter
         $start_date = $request->input('start_date');
         // Validate the date input
@@ -101,12 +242,17 @@ class DeviceController extends Controller
             $date = Carbon::yesterday(); // Default to yesterday if the date is invalid
         }
 
-
         $startOfDay = $date->copy()->startOfDay();
         $endOfDay = $date->copy()->endOfDay();
 
         // Query to get all employees
-        $employees = DB::table('employees')->select('employee_id', 'name')->get();
+        $employees = DB::table('employees')
+            ->when($companyId, function ($query, $companyId) {
+                return $query->where('company_id', $companyId);
+            })
+            ->select('employee_id', 'name')
+            ->get();
+
         // Query to get attendance data for the specified date
         $attendanceData = DB::table('attendances')
             ->select(
@@ -114,6 +260,9 @@ class DeviceController extends Controller
                 DB::raw('MIN(CASE WHEN status1 = 0 THEN timestamp END) as first_in'),
                 DB::raw('MAX(CASE WHEN status1 = 1 THEN timestamp END) as last_out')
             )
+            ->when($companyId, function ($query, $companyId) {
+                return $query->where('company_id', $companyId);
+            })
             ->whereBetween('timestamp', [$startOfDay, $endOfDay])
             ->groupBy('employee_id')
             ->get()
@@ -146,8 +295,11 @@ class DeviceController extends Controller
     {
         return view('devices.monthly');
     }
+
     public function getMonthlyAttendanceSummary(Request $request)
     {
+        $companyId = current_company_id();
+
         $startDate = $request->input('start_date');
         $endDate = $request->input('end_date');
         $employeeId = $request->input('employee_id');
@@ -161,6 +313,9 @@ class DeviceController extends Controller
         $endDate = Carbon::parse($endDate)->endOfDay();
         // Find the employee
         $employee = DB::table('employees')
+            ->when($companyId, function ($query, $companyId) {
+                return $query->where('company_id', $companyId);
+            })
             ->where(function ($query) use ($employeeId, $employeeName) {
                 if ($employeeId) {
                     $query->where('employee_id', $employeeId);
@@ -182,6 +337,9 @@ class DeviceController extends Controller
                 DB::raw('MAX(CASE WHEN status1 = 1 THEN timestamp END) as last_out')
             )
             ->where('employee_id', $employee->employee_id)
+            ->when($companyId, function ($query, $companyId) {
+                return $query->where('company_id', $companyId);
+            })
             ->whereBetween('timestamp', [$startDate, $endDate])
             ->groupBy(DB::raw('DATE(timestamp)'))
             ->get();
@@ -201,6 +359,17 @@ class DeviceController extends Controller
         });
         return response()->json(['data' => $result]);
     }
+
+    protected function authorizeCompany(?int $companyId): void
+    {
+        $user = auth()->user();
+
+        if ($user->isSuperAdmin()) {
+            return;
+        }
+
+        if ($companyId && $user->company_id !== $companyId) {
+            abort(403);
+        }
+    }
 }
- 
- 

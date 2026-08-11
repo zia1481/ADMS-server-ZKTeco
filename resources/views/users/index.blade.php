@@ -22,13 +22,13 @@
             <div class="col-md-6">
                 <div class="form-group">
                     <label for="name" class="form-label">Name</label>
-                    <input type="text" class="form-control" id="name" name="name" placeholder="Enter Name">
+                    <input type="text" class="form-control" id="name" name="name" placeholder="Enter Name" required>
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="form-group">
                     <label for="email" class="form-label">Email</label>
-                    <input type="email" class="form-control" id="email" name="email" placeholder="Enter Email">
+                    <input type="email" class="form-control" id="email" name="email" placeholder="Enter Email" required>
                 </div>
             </div>
         </div>
@@ -37,47 +37,78 @@
                 <div class="form-group">
                     <label for="password" class="form-label">Password</label>
                     <input type="password" class="form-control" id="password" name="password"
-                        placeholder="Enter Password">
+                        placeholder="Enter Password" required>
                 </div>
             </div>
             <div class="col-md-6">
-                <div class="form-group form-check col">
-                    <p>&#160;</p>
-                    <input class="form-check-input" type="checkbox" value="1" id="isAdmin" name="isAdmin">
-                    <label class="form-check-label" for="isAdmin">
-                        Is Super Admin?
-                    </label>
+                <div class="form-group">
+                    <label for="role" class="form-label">Role</label>
+                    <select class="form-control" id="role" name="role" required>
+                        <option value="company_admin">Company Admin</option>
+                        @if(!auth()->user()->isSuperAdmin())
+                            <option value="viewer">Viewer</option>
+                        @endif
+                    </select>
                 </div>
             </div>
         </div>
-        <div class="d-flex">
-            <div>
-
+        @if(auth()->user()->isSuperAdmin())
+            <div class="row mb-3" id="company-row">
+                <div class="col-md-6">
+                    <div class="form-group">
+                        <label for="company_id" class="form-label">Company</label>
+                        <select class="form-control" id="company_id" name="company_id" required>
+                            <option value="">-- Select Company --</option>
+                            @foreach($companies as $company)
+                                <option value="{{ $company->id }}" @selected(current_company_id() === $company->id)>{{ $company->name }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                </div>
             </div>
+        @endif
+        <div class="d-flex">
             <div class="ms-auto">
                 <button type="submit" class="btn btn-primary pull-right">Create</button>
             </div>
         </div>
     </form>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const role = document.getElementById('role');
+            const companyRow = document.getElementById('company-row');
+            const companySelect = document.getElementById('company_id');
 
+            function toggleCompany() {
+                if (companyRow) {
+                    companyRow.style.display = role.value === 'super_admin' ? 'none' : '';
+                }
+                if (companySelect && role.value === 'super_admin') {
+                    companySelect.value = '';
+                }
+            }
 
+            role.addEventListener('change', toggleCompany);
+            toggleCompany();
+        });
+    </script>
 
-    <table class="table table-bordered">
+    <table class="table table-bordered mt-4">
         <thead>
             <tr>
                 <th>Admin Name</th>
                 <th>Employee Email</th>
-                <th>Is Admin</th>
+                <th>Role</th>
                 <th>Action</th>
             </tr>
         </thead>
         <tbody>
             @foreach($users as $user)
                 <tr>
-                    <td>{{ $user->name}}</td>
+                    <td>{{ $user->name }}</td>
                     <td>{{ $user->email }}</td>
-                    <td>{{ $user->is_admin ? 'Yes' : 'No' }}</td>
+                    <td>{{ ucwords(str_replace('_', ' ', $user->role)) }}</td>
                     <td>
                         <form action="{{ route('users.destroy', $user->id) }}" method="POST">
                             @csrf
@@ -88,7 +119,6 @@
                 </tr>
             @endforeach
         </tbody>
-
     </table>
 </div>
 @endsection

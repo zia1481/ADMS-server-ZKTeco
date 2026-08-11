@@ -48,7 +48,7 @@
             },
             dom: '<"row"<"col-md-6"f>>t<"row"<"col-md-6"B>>',
             buttons: [
-                'excel', 'pdf', 'pageLength'
+                'excel', 'pdf', 'print', 'pageLength'
             ],
             searching: false,
             pageLength: 100,

@@ -68,7 +68,7 @@ $(document).ready(function () {
         },
         dom: '<"row"<"col-md-6"i><"col-md-6"f>>t<"row"<"col-md-6"B><"col-md-6"p>>',
         buttons: [
-            'excel', 'pdf', 'pageLength'
+            'excel', 'pdf', 'print', 'pageLength'
         ],
         searching: false,
         pageLength: 100,
