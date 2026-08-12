@@ -334,6 +334,10 @@ class iclockController extends Controller
      * Unknown devices and registered devices without a stored key pass in
      * non-strict mode (handshake/heartbeat only). In strict mode (data push)
      * a device must have a stored key that matches the presented key.
+     *
+     * A device with a stored key that presents no key is still allowed to
+     * handshake (non-strict) so it can receive PushComKey + Stamp from the
+     * handshake response; the key remains strictly enforced on data pushes.
      */
     private function commKeyAccepted(Request $request, ?object $device, bool $strict = false): bool
     {
@@ -349,7 +353,11 @@ class iclockController extends Controller
 
         $presented = $this->presentedCommKey($request);
 
-        return $presented !== null && hash_equals((string) $stored, $presented);
+        if ($strict) {
+            return $presented !== null && hash_equals((string) $stored, $presented);
+        }
+
+        return $presented === null || hash_equals((string) $stored, $presented);
     }
 
     private function validateAndFormatInteger($value)
