@@ -260,6 +260,66 @@ device registers via the "Devices pending" screen in the admin dashboard.
   `PushComKey=<key>` and that attendance rows appear after the device pushes
   with a matching `ComKey`.
 
+## 11. Updating the app
+
+Repeat these steps after every code update from `origin/main`. Adapt each step
+to the changes actually shipped.
+
+### Local
+
+Commit and push all work before deploying:
+
+```bash
+git add -A && git commit -m "describe the change" && git push origin main
+```
+
+### Server
+
+```bash
+cd /var/www/adms
+
+# 1. Optional safety backup before upgrading
+sudo cp -r . ../adms.backup-$(date +%F)
+
+# 2. Pull the new code
+sudo git pull origin main
+
+# 3. Install PHP dependencies (new/changed composer.json)
+sudo composer install --no-dev --optimize-autoloader
+
+# 4. Rebuild frontend assets ONLY if JS/CSS/Vite sources changed
+sudo -u www-data npm install
+sudo -u www-data npm run build
+
+# 5. Run pending migrations (new database migrations)
+sudo -u www-data php artisan migrate --force
+
+# 6. Refresh the compiled caches (config/routes/views)
+sudo -u www-data php artisan optimize:clear
+sudo -u www-data php artisan config:cache
+sudo -u www-data php artisan route:cache
+sudo -u www-data php artisan view:cache
+
+# 7. Fix permissions (in case files were created by root)
+sudo chown -R www-data:www-data storage bootstrap/cache
+
+# 8. Restart/reload services to pick up the new code
+sudo systemctl reload apache2        # or: sudo systemctl restart apache2
+sudo systemctl reload php8.*-fpm     # only if using PHP-FPM (clears opcache)
+```
+
+### After the upgrade
+
+- If the release changed server-level Apache config (e.g. virtual host,
+  ports, Basic Auth `<Location>` blocks), edit
+  `/etc/apache2/sites-available/adms.conf` manually and reload Apache.
+- Check `/var/log/apache2/access.log` and
+  `/var/www/adms/storage/logs/laravel.log` for errors.
+- Verify `/iclock/cdata`, `/iclock/test`, and `/iclock/getrequest` respond as
+  expected (`curl http://your-domain.com:8080/iclock/test?SN=XXXX`).
+- If the release introduced a new required field (like a device Comm Key),
+  complete the data-entry step in the admin UI for existing records.
+
 ## Troubleshooting
 
 - Check Apache errors:

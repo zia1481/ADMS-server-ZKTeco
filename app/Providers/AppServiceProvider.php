@@ -11,9 +11,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        if (config('app.env') === 'production') {
-            \Illuminate\Support\Facades\URL::forceScheme("https");
-        }
+        $this->app->booted(function () {
+            if ($this->app['request']->isSecure()) {
+                \Illuminate\Support\Facades\URL::forceScheme("https");
+            }
+        });
     }
 
     /**
