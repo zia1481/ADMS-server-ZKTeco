@@ -46,6 +46,7 @@
                     <th>Serial Number</th>
                     <th>IP Address</th>
                     <th>Model</th>
+                    <th>Comm Key</th>
                     <th>First Seen</th>
                     <th>Last Seen</th>
                     <th>State</th>
@@ -58,6 +59,13 @@
                         <td><span class="badge text-bg-light border">{{ $d->sn }}</span></td>
                         <td><span class="font-monospace small">{{ $d->ip_address ?? '-' }}</span></td>
                         <td>{{ $d->model ?? '-' }}</td>
+                        <td>
+                            @if($d->device_comm_key)
+                                <span class="text-muted small"><i class="bi bi-key me-1"></i>••••</span>
+                            @else
+                                <span class="badge text-bg-warning">No key</span>
+                            @endif
+                        </td>
                         <td class="small">{{ $d->first_seen }}</td>
                         <td class="small">{{ $d->last_seen }}</td>
                         <td>
@@ -133,7 +141,7 @@
                     </tr>
                 @empty
                     <tr data-empty-row>
-                        <td colspan="7">
+                        <td colspan="8">
                             @include('layouts.partials.empty-state', [
                                 'icon' => 'bi-usb-plug',
                                 'title' => 'No pending devices',
@@ -181,6 +189,12 @@
                                 @endforeach
                             </select>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label">Comm Key <span class="required-mark">*</span></label>
+                            <input type="text" name="comm_key" class="form-control" inputmode="numeric"
+                                pattern="[0-9]{4,8}" maxlength="8" placeholder="4-8 digit device communication key" required>
+                            <div class="form-text">Must match the communication key configured on the device. Data is only accepted when this key matches.</div>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
@@ -225,6 +239,13 @@
                                         <option value="{{ $area->id }}" data-company="{{ $area->company_id }}" @selected($d->device_area_id === $area->id) @if(str_starts_with($area->name, 'Default')) data-default="1" @endif>{{ $area->name }}</option>
                                     @endforeach
                                 </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Comm Key <span class="required-mark">*</span></label>
+                                <input type="text" name="comm_key" class="form-control" inputmode="numeric"
+                                    pattern="[0-9]{4,8}" maxlength="8" placeholder="4-8 digit device communication key"
+                                    value="{{ $d->device_comm_key }}" required>
+                                <div class="form-text">Must match the communication key configured on the device. Data is only accepted when this key matches.</div>
                             </div>
                         </div>
                         <div class="modal-footer">

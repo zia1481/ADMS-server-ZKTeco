@@ -1,7 +1,7 @@
 # Deployment Guide — ADMS on Ubuntu (Apache + port 8080 + Cloudflare)
 
 This guide deploys ADMS (Laravel 10, MySQL, Bootstrap/Vite) on Ubuntu with Apache
-listening on port 8080, `.htaccess`-style Basic Auth protecting the ZKTeco device
+listening on port 8080, CommKey authentication protecting the ZKTeco device
 endpoints (`/iclock/*`), and Cloudflare in front.
 
 ## Prerequisites
@@ -171,7 +171,7 @@ sudo nano /etc/apache2/sites-available/adms.conf
 Enable the site and modules:
 
 ```bash
-sudo a2enmod rewrite auth_basic
+sudo a2enmod rewrite
 sudo a2ensite adms.conf
 sudo a2dissite 000-default.conf
 sudo systemctl restart apache2
@@ -183,52 +183,24 @@ Open the firewall:
 sudo ufw allow 8080/tcp
 ```
 
-## 7. Protect the device endpoints with Basic Auth
+## 7. Device CommKey authentication
 
-Create the htpasswd file:
+The `/iclock/*` device endpoints are protected by the application itself using
+the ZKTeco **communication key (CommKey)** — no Apache Basic Auth is required.
+Each device stores its own 4–8 digit key, and attendance data is only accepted
+when the `ComKey` sent by the device matches the key stored for that device.
 
-```bash
-sudo mkdir -p /etc/apache2/htpasswd
-sudo htpasswd -c /etc/apache2/htpasswd/.htpasswd device
-```
+To set a device's key:
 
-Add more users if needed (each `sudo htpasswd` call after `-c` adds a user):
-
-```bash
-sudo htpasswd /etc/apache2/htpasswd/.htpasswd admin
-```
-
-Add `<Location>` blocks to `/etc/apache2/sites-available/adms.conf` (inside the
-`<VirtualHost>`):
-
-```apache
-<Location "/iclock/cdata">
-    AuthType Basic
-    AuthName "Restricted Content"
-    AuthUserFile /etc/apache2/htpasswd/.htpasswd
-    Require valid-user
-</Location>
-
-<Location "/iclock/test">
-    AuthType Basic
-    AuthName "Restricted Content"
-    AuthUserFile /etc/apache2/htpasswd/.htpasswd
-    Require valid-user
-</Location>
-
-<Location "/iclock/getrequest">
-    AuthType Basic
-    AuthName "Restricted Content"
-    AuthUserFile /etc/apache2/htpasswd/.htpasswd
-    Require valid-user
-</Location>
-```
-
-Restart Apache:
-
-```bash
-sudo systemctl restart apache2
-```
+1. Configure the communication key on the ZKTeco device (the default is
+   `88888888`).
+2. In the admin dashboard, open **Devices → New Devices** and press **Assign** on
+   the detected device. Enter the same key in the **Comm Key** field.
+3. On handshake, the server returns `IsPushComKey=1` and `PushComKey=<key>`, so
+   the device sends `ComKey=<key>` on every request. Requests with a missing or
+   wrong key are rejected with `ERROR: 0`.
+4. Already-registered devices without a key keep handshaking but their data is
+   rejected until a key is set via **Devices → Edit → Comm Key**.
 
 ## 8. Cloudflare
 
@@ -260,17 +232,18 @@ sudo ufw deny 8080/tcp
 
 ## 9. Configure the ZKTeco device
 
-The device (e.g. ZKTeco SpeedFace-V5L-RFID) must be pointed at the protected
-endpoint. The device comm settings are:
+The device (e.g. ZKTeco SpeedFace-V5L-RFID) must be pointed at the server. The
+device comm settings are:
 
 - **Server / IP**: `your-domain.com`
 - **Port**: `8080`
-- **CommKey / Security key**: as configured on your device
+- **CommKey / Security key**: a 4–8 digit key (e.g. `123456`), the same value
+  you will enter when assigning the device in **Devices → New Devices**.
 
-The device endpoint uses the Basic Auth credentials in the URL:
+The device URL does not need credentials:
 
 ```
-http://device:DEVICE_PASSWORD@your-domain.com:8080
+http://your-domain.com:8080
 ```
 
 The device handshakes at `/iclock/cdata` and pushes logs there. Verify the
@@ -283,6 +256,9 @@ device registers via the "Devices pending" screen in the admin dashboard.
 - Device handshake: check `/var/log/apache2/access.log` for `GET /iclock/cdata`
   entries from the device.
 - The device shows **online** in the dashboard after a handshake.
+- Confirm the handshake response contains `IsPushComKey=1` and
+  `PushComKey=<key>` and that attendance rows appear after the device pushes
+  with a matching `ComKey`.
 
 ## Troubleshooting
 
@@ -292,12 +268,14 @@ device registers via the "Devices pending" screen in the admin dashboard.
   sudo tail -f /var/log/apache2/error.log
   ```
 
-- Ensure Basic Auth module is enabled:
+- Device data rejected (`ERROR: 0`):
 
   ```bash
-  sudo a2enmod auth_basic
-  sudo systemctl restart apache2
+  sudo tail -f /var/log/apache2/access.log
   ```
+
+  Confirm the `ComKey` sent by the device matches the **Comm Key** stored for
+  the device under **Devices → New Devices → Assign** (or **Devices → Edit**).
 
 - Laravel logs:
 

@@ -24,6 +24,7 @@ class Device extends Model
         'model',
         'fw_ver',
         'push_ver',
+        'comm_key',
         'status',
     ];
 

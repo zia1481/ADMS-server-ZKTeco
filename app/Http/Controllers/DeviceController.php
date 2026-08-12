@@ -80,9 +80,16 @@ class DeviceController extends Controller
             'nama' => 'nullable|string|max:255',
             'area_id' => 'nullable|exists:areas,id',
             'status' => 'nullable|in:registered,pending,blocked',
+            'comm_key' => 'nullable|digits_between:4,8',
         ]);
 
-        $device->update($request->only(['nama', 'area_id', 'status']));
+        $data = $request->only(['nama', 'area_id', 'status']);
+
+        if ($request->filled('comm_key')) {
+            $data['comm_key'] = $request->comm_key;
+        }
+
+        $device->update($data);
 
         return redirect()->route('devices.index')->with('success', 'Device updated successfully');
     }
@@ -94,7 +101,8 @@ class DeviceController extends Controller
             ->select(
                 'pending_devices.*',
                 'devices.company_id as device_company_id',
-                'devices.area_id as device_area_id'
+                'devices.area_id as device_area_id',
+                'devices.comm_key as device_comm_key'
             );
 
         if ($request->filled('state')) {
@@ -115,6 +123,7 @@ class DeviceController extends Controller
             'sn' => 'required|string|exists:pending_devices,sn',
             'company_id' => 'required|integer|exists:companies,id',
             'area_id' => 'nullable|integer|exists:areas,id',
+            'comm_key' => 'required|digits_between:4,8',
         ]);
 
         $pending = PendingDevice::where('sn', $request->sn)->firstOrFail();
@@ -137,6 +146,7 @@ class DeviceController extends Controller
                 'model' => $pending->model,
                 'fw_ver' => $pending->fw_ver,
                 'push_ver' => $pending->push_ver,
+                'comm_key' => $request->comm_key,
                 'status' => Device::STATUS_REGISTERED,
             ]
         );

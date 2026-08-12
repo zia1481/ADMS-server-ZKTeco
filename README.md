@@ -21,7 +21,7 @@ Access is a comprehensive Attendance Device Management System designed to handle
 9. [Deploying to Production](#deploying-to-production)
     - [Installing Apache](#installing-apache)
     - [Configuring Apache for Laravel](#configuring-apache-for-laravel)
-    - [Securing Specific Routes with .htaccess Password Protection](#securing-specific-routes-with-htaccess-password-protection)
+    - [Securing Device Routes with CommKey Authentication](#securing-device-routes-with-commkey-authentication)
     - [Routing Traffic through Port 8080 with Cloudflare](#routing-traffic-through-port-8080-with-cloudflare)
 10. [Troubleshooting](#troubleshooting)
 
@@ -39,7 +39,9 @@ You will need to provide server address to the Zkteco SpeedFace-V5L-RFID device.
 ![image](./screenshots/sh_1.png)
 
 But the issue is anyone on the same network can access these routes.
-To ensure the security and integrity of the data, it is essential to protect these routes from unauthorized access. This is achieved by implementing .htaccess password protection.
+To ensure the security and integrity of the data, the application authenticates
+every device request with the ZKTeco communication key (CommKey). Attendance data
+is only accepted when the presented key matches the key stored for that device.
 
 ## Prerequisites
 
@@ -267,87 +269,59 @@ nvm alias default 'lts/*'
     sudo systemctl restart apache2
     ```
 
-### Securing Specific Routes with .htaccess Password Protection
+### Securing Device Routes with CommKey Authentication
 
-1. Create a password file:
+The `/iclock/cdata`, `/iclock/test`, and `/iclock/getrequest` routes are protected
+by the application itself using the ZKTeco **communication key (CommKey)** — no
+Apache password protection is needed. Data is only accepted when the key presented
+by the device matches the key stored for that device.
 
-    ```
-    sudo mkdir /etc/apache2/htpasswd
-    sudo htpasswd -c /etc/apache2/htpasswd/.htpasswd user1
-    ```
+1. Configure the communication key on the ZKTeco device (a 4–8 digit number, e.g.
+   `123456`). The default key on ZKTeco devices is `88888888`.
 
-    You'll be prompted to enter and confirm a password for `user1`.
+2. In the application, open **Devices → New Devices** (Super Admin) and press
+   **Assign** for the detected device. Enter the same communication key in the
+   **Comm Key** field and choose the company/area.
 
-2. Add more users (if needed):
+3. The device handshakes at `/iclock/cdata`; the server responds with
+   `IsPushComKey=1` and `PushComKey=<key>`, telling the device to include
+   `ComKey=<key>` on every request. Requests with a missing or wrong key are
+   rejected with `ERROR: 0`.
 
-    ```
-    sudo htpasswd /etc/apache2/htpasswd/.htpasswd admin
-    ```
+4. Already-registered devices without a stored key are rejected until a key is
+   assigned via **Devices → Edit → Comm Key**.
 
-3. Modify your Apache configuration file:
+The `.htaccess` at the project/public directory should look like:
 
-    ```
-    sudo nano /etc/apache2/sites-available/your-project-name.conf
-    ```
+```apache
+<IfModule mod_rewrite.c>
+ <IfModule mod_negotiation.c>
+     Options -MultiViews -Indexes
+ </IfModule>
 
-    Add the following lines inside the `<Directory>` block for the routes you want to protect:
+ RewriteEngine On
 
-    ```apache
-    <Location "/iclock/cdata">
-        AuthType Basic
-        AuthName "Restricted Content"
-        AuthUserFile /etc/apache2/htpasswd/.htpasswd
-        Require valid-user
-    </Location>
+ # Handle Authorization Header
+ RewriteCond %{HTTP:Authorization} .
+ RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
-    <Location "/iclock/test">
-        AuthType Basic
-        AuthName "Restricted Content"
-        AuthUserFile /etc/apache2/htpasswd/.htpasswd
-        Require valid-user
-    </Location>
+ # Redirect Trailing Slashes If Not A Folder...
+ RewriteCond %{REQUEST_FILENAME} !-d
+ RewriteCond %{REQUEST_URI} (.+)/$
+ RewriteRule ^ %1 [L,R=301]
 
-    <Location "/iclock/getrequest">
-        AuthType Basic
-        AuthName "Restricted Content"
-        AuthUserFile /etc/apache2/htpasswd/.htpasswd
-        Require valid-user
-    </Location>
-    ```
+ # Send Requests To Front Controller...
+ RewriteCond %{REQUEST_FILENAME} !-d
+ RewriteCond %{REQUEST_FILENAME} !-f
+ RewriteRule ^ index.php [L]
+</IfModule>
+```
 
-    This will protect the specified routes (`/iclock/cdata`, `/iclock/test`, and `/iclock/getrequest`) with the `.htaccess` password, allowing only authorized users to access them.
+Restart Apache:
 
-    `.htaccess` at project/public directory should look like:
-
-    ```apache
-    <IfModule mod_rewrite.c>
-     <IfModule mod_negotiation.c>
-         Options -MultiViews -Indexes
-     </IfModule>
-
-     RewriteEngine On
-
-     # Handle Authorization Header
-     RewriteCond %{HTTP:Authorization} .
-     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-
-     # Redirect Trailing Slashes If Not A Folder...
-     RewriteCond %{REQUEST_FILENAME} !-d
-     RewriteCond %{REQUEST_URI} (.+)/$
-     RewriteRule ^ %1 [L,R=301]
-
-     # Send Requests To Front Controller...
-     RewriteCond %{REQUEST_FILENAME} !-d
-     RewriteCond %{REQUEST_FILENAME} !-f
-     RewriteRule ^ index.php [L]
-    </IfModule>
-    ```
-
-4. Restart Apache:
-
-    ```
-    sudo systemctl restart apache2
-    ```
+```
+sudo systemctl restart apache2
+```
 
 ### Routing Traffic through Port 8080
 
@@ -356,10 +330,12 @@ To add an extra layer of security, the application will be accessible through po
 The endpoint for the Zkteco devices will be in the following format:
 
 ```
-username:password@your-domain.com:8080
+http://your-domain.com:8080
 ```
 
-This ensures that all traffic to the application is routed through Cloudflare, providing additional security and performance benefits.
+The communication key is sent by the device itself as the `ComKey` query
+parameter on every request (e.g. `/iclock/cdata?SN=XXXX&ComKey=123456`), so no
+credentials need to be embedded in the device URL.
 
 ## Troubleshooting
 
@@ -371,16 +347,20 @@ If you encounter any issues during the deployment process, try the following ste
     sudo tail -f /var/log/apache2/error.log
     ```
 
-2. Ensure the `auth_basic` module is enabled:
+2. Ensure the Laravel application is reachable on port 8080:
 
     ```
-    sudo a2enmod auth_basic
-    sudo systemctl restart apache2
+    curl http://your-domain.com:8080/iclock/test?SN=XXXX
     ```
 
 3. Verify that `AllowOverride All` is set in your Apache configuration.
 
-4. Test your `.htaccess` file by intentionally adding a syntax error to see if it causes a 500 Internal Server Error.
+4. Confirm the device's communication key is enabled and set to the same value
+   stored for the device under **Devices → New Devices → Assign**.
+
+5. The device handshake response includes `IsPushComKey=1` and `PushComKey=<key>`
+   when a key is set. If the device stops sending data, check the `ComKey` value
+   in `/var/log/apache2/access.log`.
 
 For more information on Laravel deployment and best practices, refer to the [official Laravel documentation](https://laravel.com/docs).
 

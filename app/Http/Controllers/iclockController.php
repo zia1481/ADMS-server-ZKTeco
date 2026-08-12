@@ -24,6 +24,10 @@ class iclockController extends Controller
 
         $device = DB::table('devices')->where('no_sn', $sn)->first();
 
+        if (!$this->commKeyAccepted($request, $device)) {
+            return "ERROR: 0";
+        }
+
         if ($device) {
             if ($device->status === 'blocked') {
                 return "ERROR: 0";
@@ -38,11 +42,32 @@ class iclockController extends Controller
             $this->detectNewDevice($request);
         }
 
-        return $this->buildHandshakeResponse($sn, $request->input('DeviceType'));
+        return $this->buildHandshakeResponse($sn, $request->input('DeviceType'), $device);
     }
 
     public function receiveRecords(Request $request)
     {
+        $sn = $request->input('SN') ?? ' ';
+        $device = DB::table('devices')->where('no_sn', $sn)->first();
+
+        if (!$device) {
+            $this->detectNewDevice($request);
+
+            return "ERROR: 0";
+        }
+
+        if ($device->status === 'blocked') {
+            return "ERROR: 0";
+        }
+
+        if (!$device->company_id) {
+            $this->detectNewDevice($request);
+        }
+
+        if (!$this->commKeyAccepted($request, $device, true)) {
+            return "ERROR: 0";
+        }
+
         $maxLength = 6550;
         $jsonData = json_encode($request->all());
         if (strlen($jsonData) > $maxLength) {
@@ -53,21 +78,6 @@ class iclockController extends Controller
             'url' => json_encode($request->all()),
             'data' => $jsonData,
         ]);
-
-        $sn = $request->input('SN') ?? ' ';
-        $device = DB::table('devices')->where('no_sn', $sn)->first();
-
-        if (!$device) {
-            $this->detectNewDevice($request);
-        }
-
-        if ($device && $device->status === 'blocked') {
-            return "ERROR: 0";
-        }
-
-        if ($device && !$device->company_id) {
-            $this->detectNewDevice($request);
-        }
 
         try {
             $arr = preg_split('/\\r\\n|\\r|\\n/', $request->getContent());
@@ -126,6 +136,13 @@ class iclockController extends Controller
 
     public function test(Request $request)
     {
+        $sn = $request->input('SN');
+        $device = $sn ? DB::table('devices')->where('no_sn', $sn)->first() : null;
+
+        if (!$this->commKeyAccepted($request, $device)) {
+            return "ERROR: 0";
+        }
+
         DB::table('finger_log')->insert([
             'data' => $request->getContent(),
             'url' => $request->fullUrl(),
@@ -139,6 +156,10 @@ class iclockController extends Controller
         $sn = $request->input('SN');
 
         $device = DB::table('devices')->where('no_sn', $sn)->first();
+
+        if (!$this->commKeyAccepted($request, $device)) {
+            return "ERROR: 0";
+        }
 
         if ($device) {
             DB::table('devices')->where('no_sn', $sn)->update(['online' => now()]);
@@ -211,7 +232,7 @@ class iclockController extends Controller
         DB::table('device_log')->insert($data);
     }
 
-    private function buildHandshakeResponse(string $sn, ?string $deviceType = null): string
+    private function buildHandshakeResponse(string $sn, ?string $deviceType = null, ?object $device = null): string
     {
         $config = DB::table('device_handshake_configs')
             ->where(function ($query) use ($deviceType) {
@@ -255,7 +276,66 @@ class iclockController extends Controller
         $r .= "Realtime=" . ($realtime ? 1 : 0) . "\r\n" .
             "Encrypt=" . ($encrypt ? 1 : 0);
 
+        if ($device && !empty($device->comm_key)) {
+            $r .= "\r\nIsPushComKey=1\r\nPushComKey=" . $device->comm_key;
+        }
+
         return $r;
+    }
+
+    /**
+     * Extract the communication key presented by the device from the query
+     * string (ZKTeco ComKey), an HTTP header, or HTTP Basic Auth credentials.
+     */
+    private function presentedCommKey(Request $request): ?string
+    {
+        $key = $request->query('ComKey');
+
+        if ($key === null || $key === '') {
+            $key = $request->query('commkey');
+        }
+
+        if (($key === null || $key === '') && $request->hasHeader('X-Comm-Key')) {
+            $key = $request->header('X-Comm-Key');
+        }
+
+        if (($key === null || $key === '') && $request->hasHeader('CommKey')) {
+            $key = $request->header('CommKey');
+        }
+
+        if (($key === null || $key === '') && $request->getUser() !== null) {
+            $key = $request->getUser();
+        }
+
+        if (($key === null || $key === '') && $request->getPassword() !== null) {
+            $key = $request->getPassword();
+        }
+
+        return $key !== null ? trim((string) $key) : null;
+    }
+
+    /**
+     * Validate the device's communication key.
+     *
+     * Unknown devices and registered devices without a stored key pass in
+     * non-strict mode (handshake/heartbeat only). In strict mode (data push)
+     * a device must have a stored key that matches the presented key.
+     */
+    private function commKeyAccepted(Request $request, ?object $device, bool $strict = false): bool
+    {
+        if (!$device) {
+            return !$strict;
+        }
+
+        $stored = $device->comm_key ?? null;
+
+        if ($stored === null || $stored === '') {
+            return !$strict;
+        }
+
+        $presented = $this->presentedCommKey($request);
+
+        return $presented !== null && hash_equals((string) $stored, $presented);
     }
 
     private function validateAndFormatInteger($value)

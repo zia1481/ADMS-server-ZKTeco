@@ -140,6 +140,12 @@
                                 <option value="blocked" @selected($d->status === 'blocked')>Blocked</option>
                             </select>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label">Comm Key</label>
+                            <input type="text" name="comm_key" class="form-control" inputmode="numeric"
+                                pattern="[0-9]{4,8}" maxlength="8" placeholder="Leave blank to keep current key">
+                            <div class="form-text">Must match the communication key configured on the device.</div>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
