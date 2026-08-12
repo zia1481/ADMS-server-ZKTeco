@@ -69,14 +69,14 @@ class iclockController extends Controller
         }
 
         $maxLength = 6550;
-        $jsonData = json_encode($request->all());
-        if (strlen($jsonData) > $maxLength) {
-            $jsonData = substr($jsonData, 0, $maxLength);
+        $body = $request->getContent();
+        if (strlen($body) > $maxLength) {
+            $body = substr($body, 0, $maxLength);
         }
         // Log the incoming request
         FingerLog::create([
             'url' => json_encode($request->all()),
-            'data' => $jsonData,
+            'data' => $body,
         ]);
 
         try {
@@ -118,6 +118,20 @@ class iclockController extends Controller
             // Perform batch insert into staging table
             if (!empty($staging)) {
                 DB::table('attendance_staging')->insert($staging);
+
+                // Advance the device's stored stamp to the newest record received so
+                // future handshakes only request incremental data (Stamp=0 -> upload all).
+                $maxStamp = null;
+                foreach ($staging as $row) {
+                    $ts = $row['punch_time'] ? strtotime($row['punch_time']) : false;
+                    if ($ts !== false && ($maxStamp === null || $ts > $maxStamp)) {
+                        $maxStamp = $ts;
+                    }
+                }
+                if ($maxStamp !== null) {
+                    DB::table('devices')->where('no_sn', $sn)->update(['attlog_stamp' => $maxStamp]);
+                }
+
                 \App\Jobs\ProcessAttendanceStaging::dispatch();
             }
 
@@ -244,7 +258,7 @@ class iclockController extends Controller
             ->orderByRaw('CASE WHEN device_type = ? THEN 0 ELSE 1 END', [$deviceType])
             ->first();
 
-        $stamp = $config->stamp ?? 9999;
+        $stamp = ($device && $device->attlog_stamp !== null) ? (int) $device->attlog_stamp : 0;
         $errorDelay = $config->error_delay ?? 60;
         $delay = $config->delay ?? 30;
         $resLogDay = $config->res_log_day ?? 18250;
