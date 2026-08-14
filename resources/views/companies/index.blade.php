@@ -63,7 +63,7 @@
                         <td><span class="badge text-bg-light border">{{ $company->code }}</span></td>
                         <td>{{ $company->description }}</td>
                         <td>
-                            @include('layouts.partials.status-badge', ['status' => $company->is_active ? 'active' : 'inactive'])
+                            @include('layouts.partials.status-badge', ['status' => $company->status])
                         </td>
                         <td class="text-end">
                             <div class="table-row-actions justify-content-end">
@@ -77,14 +77,30 @@
                                         <i class="bi bi-briefcase"></i> Work On
                                     </button>
                                 </form>
-                                <form action="{{ route('companies.destroy', $company->id) }}" method="POST"
-                                    data-confirm="Delete this company? Its data will be removed.">
-                                    @csrf
-                                    @method('DELETE')
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">
-                                        <i class="bi bi-trash"></i> Delete
-                                    </button>
-                                </form>
+                                @if($company->status === 'active')
+                                    <form action="{{ route('companies.disable', $company->id) }}" method="POST"
+                                        data-confirm="Disable this company? All users will lose access and devices will be rejected.">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-slash-circle"></i> Disable
+                                        </button>
+                                    </form>
+                                    <form action="{{ route('companies.review', $company->id) }}" method="POST"
+                                        data-confirm="Place this company under review? All users will be blocked from login, but device data will still be recorded.">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-warning">
+                                            <i class="bi bi-clock-history"></i> Under Review
+                                        </button>
+                                    </form>
+                                @else
+                                    <form action="{{ route('companies.enable', $company->id) }}" method="POST"
+                                        data-confirm="Enable this company? Users regain access and devices are accepted again.">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-success">
+                                            <i class="bi bi-check-circle"></i> Enable
+                                        </button>
+                                    </form>
+                                @endif
                             </div>
                         </td>
                     </tr>
@@ -131,11 +147,6 @@
                         <div class="mb-3">
                             <label class="form-label">Description</label>
                             <input type="text" name="description" class="form-control" value="{{ $company->description }}">
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="is_active" value="1"
-                                id="is_active{{ $company->id }}" @checked($company->is_active)>
-                            <label class="form-check-label" for="is_active{{ $company->id }}">Active</label>
                         </div>
                     </div>
                     <div class="modal-footer">

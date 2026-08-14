@@ -2,6 +2,8 @@
 $map = [
     'active'    => ['success', 'bi-check-circle'],
     'inactive'  => ['secondary', 'bi-dash-circle'],
+    'disabled'  => ['danger', 'bi-slash-circle'],
+    'under_review' => ['warning', 'bi-clock-history'],
     'registered'=> ['success', 'bi-check-circle'],
     'pending'   => ['warning', 'bi-hourglass-split'],
     'blocked'   => ['danger', 'bi-slash-circle'],

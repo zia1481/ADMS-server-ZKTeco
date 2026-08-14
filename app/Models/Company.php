@@ -9,16 +9,20 @@ class Company extends Model
 {
     use HasFactory, BelongsToCompany;
 
+    public const STATUS_ACTIVE = 'active';
+    public const STATUS_DISABLED = 'disabled';
+    public const STATUS_UNDER_REVIEW = 'under_review';
+
     protected $fillable = [
         'name',
         'code',
         'description',
-        'is_active',
+        'status',
         'created_by',
     ];
 
     protected $casts = [
-        'is_active' => 'boolean',
+        'status' => 'string',
     ];
 
     public function users()

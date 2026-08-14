@@ -41,6 +41,12 @@ class iclockController extends Controller
                 return 'ERROR: 0';
             }
 
+            if ($this->companyDisabled($device->company_id)) {
+                $this->debugLog('HANDSHAKE REJECTED (company disabled)', ['sn' => $sn]);
+
+                return 'ERROR: 0';
+            }
+
             DB::table('devices')->where('no_sn', $sn)->update(['online' => now()]);
 
             if (! $device->company_id) {
@@ -85,6 +91,12 @@ class iclockController extends Controller
 
         if ($device->status === 'blocked') {
             $this->debugLog('PUNCH REJECTED (blocked)', ['sn' => $sn]);
+
+            return 'ERROR: 0';
+        }
+
+        if ($this->companyDisabled($device->company_id)) {
+            $this->debugLog('PUNCH REJECTED (company disabled)', ['sn' => $sn]);
 
             return 'ERROR: 0';
         }
@@ -228,6 +240,10 @@ class iclockController extends Controller
             return 'ERROR: 0';
         }
 
+        if ($device && $this->companyDisabled($device->company_id)) {
+            return 'ERROR: 0';
+        }
+
         if ($this->logPunches()) {
             DB::table('finger_log')->insert([
                 'data' => $request->getContent(),
@@ -245,6 +261,10 @@ class iclockController extends Controller
         $device = DB::table('devices')->where('no_sn', $sn)->first();
 
         if (! $this->commKeyAccepted($request, $device)) {
+            return 'ERROR: 0';
+        }
+
+        if ($device && $this->companyDisabled($device->company_id)) {
             return 'ERROR: 0';
         }
 
@@ -454,6 +474,15 @@ class iclockController extends Controller
         }
 
         return $presented === null || hash_equals((string) $stored, $presented);
+    }
+
+    private function companyDisabled(?int $companyId): bool
+    {
+        if (! $companyId) {
+            return false;
+        }
+
+        return DB::table('companies')->where('id', $companyId)->value('status') === 'disabled';
     }
 
     private function validateAndFormatInteger($value)

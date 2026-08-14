@@ -27,7 +27,7 @@ class CompanyController extends Controller
             'name' => $request->name,
             'code' => strtoupper($request->code),
             'description' => $request->description,
-            'is_active' => $request->boolean('is_active', true),
+            'status' => Company::STATUS_ACTIVE,
             'created_by' => auth()->id(),
         ]);
 
@@ -53,17 +53,30 @@ class CompanyController extends Controller
             'name' => $request->name,
             'code' => strtoupper($request->code),
             'description' => $request->description,
-            'is_active' => $request->boolean('is_active'),
         ]);
 
         return redirect()->route('companies.index')->with('success', 'Company updated successfully');
     }
 
-    public function destroy(Company $company)
+    public function disable(Company $company)
     {
-        $company->delete();
+        $company->update(['status' => Company::STATUS_DISABLED]);
 
-        return redirect()->route('companies.index')->with('success', 'Company deleted successfully');
+        return redirect()->route('companies.index')->with('success', 'Company disabled successfully. Users can no longer log in and devices are rejected.');
+    }
+
+    public function review(Company $company)
+    {
+        $company->update(['status' => Company::STATUS_UNDER_REVIEW]);
+
+        return redirect()->route('companies.index')->with('success', 'Company placed under review. All users are blocked from login; device data is still recorded.');
+    }
+
+    public function enable(Company $company)
+    {
+        $company->update(['status' => Company::STATUS_ACTIVE]);
+
+        return redirect()->route('companies.index')->with('success', 'Company enabled successfully.');
     }
 
     public function switch(Request $request, $company = null)

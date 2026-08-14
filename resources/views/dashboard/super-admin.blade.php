@@ -97,7 +97,7 @@
                 <div class="card h-100">
                     <div class="card-body">
                         <h5 class="card-title fs-6 fw-semibold"><i class="bi bi-buildings text-primary me-2"></i>Companies</h5>
-                        <p class="card-text small text-muted mb-3">Create, edit or delete companies. A default Area is created automatically for each new company.</p>
+                        <p class="card-text small text-muted mb-3">Create, edit, disable or place companies under review. A default Area is created automatically for each new company.</p>
                         <a href="{{ route('companies.index') }}" class="btn btn-sm btn-primary">Manage Companies</a>
                     </div>
                 </div>

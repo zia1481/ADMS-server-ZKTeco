@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\Company;
+use App\Models\User;
 use Illuminate\Foundation\Auth\AuthenticatesUsers;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 
 class LoginController extends Controller
 {
@@ -40,13 +43,29 @@ class LoginController extends Controller
     }
 
     /**
-     * Disabled accounts (is_active = false) must not be able to log in.
+     * Disabled accounts (is_active = false) and users whose company is not
+     * active (disabled or under review) must not be able to log in.
      */
-    protected function credentials(Request $request)
+    protected function attemptLogin(Request $request)
     {
-        return array_merge(
-            $request->only($this->username(), 'password'),
-            ['is_active' => 1]
-        );
+        $username = $this->username();
+
+        $user = User::where($username, $request->input($username))
+            ->where('is_active', true)
+            ->where(function ($query) {
+                $query->whereNull('company_id')
+                    ->orWhereHas('company', function ($company) {
+                        $company->where('status', Company::STATUS_ACTIVE);
+                    });
+            })
+            ->first();
+
+        if ($user && Hash::check($request->password, $user->password)) {
+            $this->guard()->login($user, $request->boolean('remember'));
+
+            return true;
+        }
+
+        return false;
     }
 }

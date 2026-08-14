@@ -11,12 +11,12 @@ use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware(['auth'])->group(function () {
+Route::middleware(['auth', 'companyActive'])->group(function () {
     Route::get('/change-password', [App\Http\Controllers\UserController::class, 'showChangePasswordForm'])->name('password.change');
     Route::post('/change-password', [App\Http\Controllers\UserController::class, 'changePassword'])->name('admin-password.update');
 });
 
-Route::middleware(['auth', 'changePwd'])->group(function () {
+Route::middleware(['auth', 'changePwd', 'companyActive'])->group(function () {
     Route::get('/', function () {
         if (auth()->user()->isSuperAdmin()) {
             return redirect('admin');
@@ -95,7 +95,9 @@ Route::middleware(['auth', 'changePwd'])->group(function () {
         Route::get('companies', [CompanyController::class, 'index'])->name('companies.index');
         Route::post('companies', [CompanyController::class, 'store'])->name('companies.store');
         Route::post('companies/{company}', [CompanyController::class, 'update'])->name('companies.update');
-        Route::delete('companies/{company}', [CompanyController::class, 'destroy'])->name('companies.destroy');
+        Route::post('companies/{company}/disable', [CompanyController::class, 'disable'])->name('companies.disable');
+        Route::post('companies/{company}/review', [CompanyController::class, 'review'])->name('companies.review');
+        Route::post('companies/{company}/enable', [CompanyController::class, 'enable'])->name('companies.enable');
         Route::post('companies/switch/{company?}', [CompanyController::class, 'switch'])->name('companies.switch');
     });
 });
