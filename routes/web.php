@@ -1,16 +1,15 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\DeviceController;
-use App\Http\Controllers\iclockController;
-use App\Http\Controllers\EmployeeController;
-use App\Http\Controllers\UserController;
-use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\AreaController;
+use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\DepartmentController;
-use App\Http\Controllers\ShiftController;
+use App\Http\Controllers\DeviceController;
+use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\iclockController;
 use App\Http\Controllers\ScheduleController;
-
+use App\Http\Controllers\ShiftController;
+use App\Http\Controllers\UserController;
+use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/change-password', [App\Http\Controllers\UserController::class, 'showChangePasswordForm'])->name('password.change');
@@ -37,8 +36,6 @@ Route::middleware(['auth', 'changePwd'])->group(function () {
     Route::middleware(['role:company_admin'])->group(function () {
         Route::get('devices', [DeviceController::class, 'Index'])->name('devices.index');
         Route::post('devices/{device}', [DeviceController::class, 'update'])->name('devices.update');
-        Route::get('devices-log', [DeviceController::class, 'DeviceLog'])->name('devices.DeviceLog');
-        Route::get('finger-log', [DeviceController::class, 'FingerLog'])->name('devices.FingerLog');
 
         Route::get('areas', [AreaController::class, 'index'])->name('areas.index');
         Route::post('areas', [AreaController::class, 'store'])->name('areas.store');
@@ -84,6 +81,9 @@ Route::middleware(['auth', 'changePwd'])->group(function () {
         Route::post('devices-pending/{id}/enable', [DeviceController::class, 'enablePending'])->name('devices.enablePending');
         Route::post('devices-pending/{id}/redetect', [DeviceController::class, 'redetectPending'])->name('devices.redetectPending');
 
+        Route::get('devices-log', [DeviceController::class, 'DeviceLog'])->name('devices.DeviceLog');
+        Route::get('finger-log', [DeviceController::class, 'FingerLog'])->name('devices.FingerLog');
+
         Route::get('companies', [CompanyController::class, 'index'])->name('companies.index');
         Route::post('companies', [CompanyController::class, 'store'])->name('companies.store');
         Route::post('companies/{company}', [CompanyController::class, 'update'])->name('companies.update');
@@ -102,14 +102,24 @@ Route::get('/home', function () {
     return redirect('/attendance');
 });
 
-
 /************************************************************************************************************/
 //                                Restricted area don't remove or update                                    //
 /************************************************************************************************************/
 
 // Restriste
-Route::get('/iclock/cdata', [iclockController::class, 'handshake']);
-Route::post('/iclock/cdata', [iclockController::class, 'receiveRecords']);
+// Device endpoints are stateless polls from ZKTeco terminals — skip the
+// session/cookie/CSRF middleware so every poll stays lightweight.
+Route::withoutMiddleware([
+    \App\Http\Middleware\EncryptCookies::class,
+    \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+    \Illuminate\Session\Middleware\StartSession::class,
+    \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+    \App\Http\Middleware\VerifyCsrfToken::class,
+    \Illuminate\Routing\Middleware\SubstituteBindings::class,
+])->group(function () {
+    Route::get('/iclock/cdata', [iclockController::class, 'handshake']);
+    Route::post('/iclock/cdata', [iclockController::class, 'receiveRecords']);
 
-Route::get('/iclock/test', [iclockController::class, 'test']);
-Route::get('/iclock/getrequest', [iclockController::class, 'getrequest']);
+    Route::get('/iclock/test', [iclockController::class, 'test']);
+    Route::get('/iclock/getrequest', [iclockController::class, 'getrequest']);
+});

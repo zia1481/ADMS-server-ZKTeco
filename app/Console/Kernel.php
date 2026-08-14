@@ -12,7 +12,9 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // $schedule->command('inspire')->hourly();
+        // Fallback processor: drains attendance_staging even if no queue
+        // worker is running (run the Laravel scheduler every minute).
+        $schedule->command('attendance:process-staging')->everyMinute()->withoutOverlapping();
     }
 
     /**

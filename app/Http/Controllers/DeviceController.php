@@ -1,20 +1,24 @@
 <?php
+
 namespace App\Http\Controllers;
-use Yajra\DataTables\Facades\DataTables;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
+
 use App\Models\Area;
 use App\Models\Company;
 use App\Models\Device;
 use App\Models\Employee;
 use App\Models\PendingDevice;
 use App\Services\AttendanceStatusService;
+use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Yajra\DataTables\Facades\DataTables;
 
 class DeviceController extends Controller
 {
     const MAJOR = 1;
+
     const MINOR = 2;
+
     const PATCH = 3;
 
     public static function get()
@@ -44,6 +48,7 @@ class DeviceController extends Controller
                 'devices.online',
                 'devices.company_id',
                 'devices.area_id',
+                'devices.comm_key_enforce',
                 'companies.name as company_name',
                 'areas.name as area_name'
             )
@@ -59,12 +64,12 @@ class DeviceController extends Controller
 
         if ($request->filled('search')) {
             $query->where(function ($q) use ($request) {
-                $q->where('devices.no_sn', 'like', '%' . $request->search . '%')
-                    ->orWhere('devices.nama', 'like', '%' . $request->search . '%');
+                $q->where('devices.no_sn', 'like', '%'.$request->search.'%')
+                    ->orWhere('devices.nama', 'like', '%'.$request->search.'%');
             });
         }
 
-        $data['lable'] = "Devices";
+        $data['lable'] = 'Devices';
         $data['log'] = $query->paginate(10)->withQueryString();
         $data['areas'] = Area::forCompany($companyId)->orderBy('name')->get();
         $data['companies'] = auth()->user()->isSuperAdmin() ? Company::orderBy('name')->get() : collect();
@@ -81,6 +86,7 @@ class DeviceController extends Controller
             'area_id' => 'nullable|exists:areas,id',
             'status' => 'nullable|in:registered,pending,blocked',
             'comm_key' => 'nullable|digits_between:4,8',
+            'comm_key_enforce' => 'nullable|boolean',
         ]);
 
         $data = $request->only(['nama', 'area_id', 'status']);
@@ -88,6 +94,8 @@ class DeviceController extends Controller
         if ($request->filled('comm_key')) {
             $data['comm_key'] = $request->comm_key;
         }
+
+        $data['comm_key_enforce'] = $request->boolean('comm_key_enforce');
 
         $device->update($data);
 
@@ -109,7 +117,7 @@ class DeviceController extends Controller
             $query->where('pending_devices.state', $request->state);
         }
 
-        $data['lable'] = "Pending Devices";
+        $data['lable'] = 'Pending Devices';
         $data['log'] = $query->orderBy('pending_devices.last_seen', 'DESC')->paginate(10)->withQueryString();
         $data['companies'] = Company::orderBy('name')->get();
         $data['areas'] = Area::with('company')->orderBy('name')->get();
@@ -129,7 +137,7 @@ class DeviceController extends Controller
         $pending = PendingDevice::where('sn', $request->sn)->firstOrFail();
 
         $areaId = $request->area_id;
-        if (!$areaId) {
+        if (! $areaId) {
             $areaId = Area::where('company_id', $request->company_id)
                 ->where('name', 'like', 'Default%')
                 ->orderBy('id')
@@ -179,7 +187,7 @@ class DeviceController extends Controller
     {
         $pending = PendingDevice::findOrFail($id);
 
-        if (!in_array($pending->state, [PendingDevice::STATE_ASSIGNED, PendingDevice::STATE_BLOCKED])) {
+        if (! in_array($pending->state, [PendingDevice::STATE_ASSIGNED, PendingDevice::STATE_BLOCKED])) {
             return redirect()->route('devices.pending')->with('failed', 'Only assigned devices can be unassigned');
         }
 
@@ -228,20 +236,22 @@ class DeviceController extends Controller
 
     public function DeviceLog(Request $request)
     {
-        $data['lable'] = "Devices Log";
+        $data['lable'] = 'Devices Log';
         $perPage = 10;
         $data['log'] = DB::table('device_log')->select('id', 'data', 'url')->orderBy('id', 'DESC')->paginate($perPage);
+
         return view('devices.log', $data);
     }
 
     public function FingerLog(Request $request)
     {
-        $data['lable'] = "Finger Log";
+        $data['lable'] = 'Finger Log';
         $perPage = 10;
         $data['log'] = DB::table('finger_log')
             ->select('id', 'data', 'url')
             ->orderBy('id', 'DESC')
             ->paginate($perPage);
+
         return view('devices.log', $data);
     }
 
@@ -283,8 +293,9 @@ class DeviceController extends Controller
             $query->where('attendances.employee_id', '=', $request->employee_id);
         }
         if ($request->filled('employee_name')) {
-            $query->where('employees.name', 'like', $request->employee_name . '%');
+            $query->where('employees.name', 'like', $request->employee_name.'%');
         }
+
         return DataTables::of($query)
             ->addIndexColumn()
             ->addColumn('employee_name', function ($row) {
@@ -320,6 +331,12 @@ class DeviceController extends Controller
             ->select('id', 'company_id', 'department_id', 'employee_id', 'name')
             ->get();
 
+        // Preload every applicable schedule for the involved companies so the
+        // per-employee status loop below runs without N+1 queries.
+        $companyIds = $employees->pluck('company_id')->filter()->unique()->map(fn ($id) => (int) $id)->values()->all();
+        $statusService = app(AttendanceStatusService::class);
+        $companySchedules = $statusService->companySchedulesForDate($companyIds, $date);
+
         // Query to get attendance data for the specified date
         $attendanceData = DB::table('attendances')
             ->select(
@@ -335,17 +352,15 @@ class DeviceController extends Controller
             ->get()
             ->keyBy('employee_id');
 
-        $statusService = app(AttendanceStatusService::class);
-
         // Prepare the attendance summary
-        $attendanceSummary = $employees->map(function ($employee) use ($attendanceData, $statusService, $date) {
+        $attendanceSummary = $employees->map(function ($employee) use ($attendanceData, $statusService, $date, $companySchedules) {
 
             $attendance = $attendanceData->get($employee->employee_id);
             $firstIn = $attendance && $attendance->first_in ? Carbon::parse($attendance->first_in) : null;
             $lastOut = $attendance && $attendance->last_out ? Carbon::parse($attendance->last_out) : null;
             $totalTime = ($firstIn && $lastOut) ? sprintf('%02d:%02d', $firstIn->diffInHours($lastOut), $firstIn->diffInMinutes($lastOut) % 60) : 'N/A';
 
-            $result = $statusService->statusFor($employee, $date, $firstIn, $lastOut);
+            $result = $statusService->statusFor($employee, $date, $firstIn, $lastOut, null, $companySchedules);
 
             return [
                 'employee_id' => $employee->employee_id,
@@ -358,10 +373,11 @@ class DeviceController extends Controller
                 'status' => $result['status'],
             ];
         });
+
         return response()->json([
             'data' => $attendanceSummary,
             'startOfDay' => $startOfDay->toDateTimeString(),
-            'endOfDay' => $endOfDay->toDateTimeString()
+            'endOfDay' => $endOfDay->toDateTimeString(),
         ]);
     }
 
@@ -379,7 +395,7 @@ class DeviceController extends Controller
         $employeeId = $request->input('employee_id');
         $employeeName = $request->input('employee_name');
         // Validate input
-        if (!$startDate || !$endDate || (!$employeeId && !$employeeName)) {
+        if (! $startDate || ! $endDate || (! $employeeId && ! $employeeName)) {
             return response()->json(['data' => []]); // Return empty array if required inputs are missing
         }
         // Parse dates
@@ -393,12 +409,12 @@ class DeviceController extends Controller
                     $query->where('employee_id', $employeeId);
                 }
                 if ($employeeName) {
-                    $query->orWhere('name', 'like', '%' . $employeeName . '%');
+                    $query->orWhere('name', 'like', '%'.$employeeName.'%');
                 }
             })
             ->first();
         // If employee not found, return empty array
-        if (!$employee) {
+        if (! $employee) {
             return response()->json(['data' => []]);
         }
         // Fetch attendance records for the employee
@@ -437,6 +453,7 @@ class DeviceController extends Controller
                 'status' => $statusResult['status'],
             ];
         });
+
         return response()->json(['data' => $result]);
     }
 

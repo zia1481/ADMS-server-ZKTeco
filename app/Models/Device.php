@@ -25,6 +25,7 @@ class Device extends Model
         'fw_ver',
         'push_ver',
         'comm_key',
+        'comm_key_enforce',
         'attlog_stamp',
         'status',
     ];

@@ -88,18 +88,6 @@ $active = function (...$names) use ($routeName) {
                 <i class="bi bi-geo-alt"></i>
                 <span class="sidebar-link-text">Areas</span>
             </a>
-            <a href="{{ route('devices.DeviceLog') }}"
-                class="sidebar-link {{ $active('devices.DeviceLog') ? 'active' : '' }}"
-                title="Device Logs" data-bs-toggle="tooltip" data-bs-placement="right">
-                <i class="bi bi-receipt"></i>
-                <span class="sidebar-link-text">Device Logs</span>
-            </a>
-            <a href="{{ route('devices.FingerLog') }}"
-                class="sidebar-link {{ $active('devices.FingerLog') ? 'active' : '' }}"
-                title="Finger Logs" data-bs-toggle="tooltip" data-bs-placement="right">
-                <i class="bi bi-fingerprint"></i>
-                <span class="sidebar-link-text">Finger Logs</span>
-            </a>
         @endif
 
         @if(auth()->user()->isSuperAdmin() || auth()->user()->isCompanyAdmin())
@@ -116,6 +104,18 @@ $active = function (...$names) use ($routeName) {
                     title="New Devices" data-bs-toggle="tooltip" data-bs-placement="right">
                     <i class="bi bi-usb-plug"></i>
                     <span class="sidebar-link-text">New Devices</span>
+                </a>
+                <a href="{{ route('devices.DeviceLog') }}"
+                    class="sidebar-link {{ $active('devices.DeviceLog') ? 'active' : '' }}"
+                    title="Device Logs" data-bs-toggle="tooltip" data-bs-placement="right">
+                    <i class="bi bi-receipt"></i>
+                    <span class="sidebar-link-text">Device Logs</span>
+                </a>
+                <a href="{{ route('devices.FingerLog') }}"
+                    class="sidebar-link {{ $active('devices.FingerLog') ? 'active' : '' }}"
+                    title="Finger Logs" data-bs-toggle="tooltip" data-bs-placement="right">
+                    <i class="bi bi-fingerprint"></i>
+                    <span class="sidebar-link-text">Finger Logs</span>
                 </a>
             @endif
             <a href="{{ route('users.index') }}"

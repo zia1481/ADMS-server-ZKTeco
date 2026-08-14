@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 class Employee extends Model
 {
-    use HasFactory, BelongsToCompany;
+    use BelongsToCompany, HasFactory;
 
     protected $fillable = [
         'company_id',
@@ -37,24 +38,32 @@ class Employee extends Model
             ->withTimestamps();
     }
 
-    public function scheduleForDate(Carbon $date): ?Schedule
+    public function scheduleForDate(Carbon $date, ?Collection $companySchedules = null): ?Schedule
     {
         $dateString = $date->toDateString();
         $dayOfWeek = $date->dayOfWeek;
 
-        $assigned = $this->schedules()
-            ->where(function ($q) use ($dateString) {
-                $q->whereNull('employee_schedule.effective_from')
-                    ->orWhere('employee_schedule.effective_from', '<=', $dateString);
+        $assigned = $this->schedules
+            ->filter(function (Schedule $schedule) use ($dateString) {
+                if (! $schedule->is_active) {
+                    return false;
+                }
+
+                $effectiveFrom = $schedule->pivot->effective_from ?? null;
+                $effectiveTo = $schedule->pivot->effective_to ?? null;
+
+                if ($effectiveFrom && $effectiveFrom > $dateString) {
+                    return false;
+                }
+
+                if ($effectiveTo && $effectiveTo < $dateString) {
+                    return false;
+                }
+
+                return true;
             })
-            ->where(function ($q) use ($dateString) {
-                $q->whereNull('employee_schedule.effective_to')
-                    ->orWhere('employee_schedule.effective_to', '>=', $dateString);
-            })
-            ->where('schedules.is_active', true)
-            ->orderByDesc('employee_schedule.effective_from')
-            ->get()
-            ->first(function ($schedule) use ($dayOfWeek) {
+            ->sortByDesc(fn (Schedule $schedule) => $schedule->pivot->effective_from ?? '')
+            ->first(function (Schedule $schedule) use ($dayOfWeek) {
                 return $this->worksOnDay($schedule, $dayOfWeek);
             });
 
@@ -62,12 +71,47 @@ class Employee extends Model
             return $assigned;
         }
 
+        $candidates = $companySchedules ?? $this->loadCompanySchedules($dateString);
+
+        return $candidates
+            ->filter(function (Schedule $schedule) use ($dateString) {
+                if (! $schedule->is_active) {
+                    return false;
+                }
+
+                if ((int) $schedule->company_id !== (int) $this->company_id) {
+                    return false;
+                }
+
+                if ($schedule->department_id !== $this->department_id && $schedule->department_id !== null) {
+                    return false;
+                }
+
+                $effectiveFrom = $schedule->effective_from ? $schedule->effective_from->toDateString() : null;
+                $effectiveTo = $schedule->effective_to ? $schedule->effective_to->toDateString() : null;
+
+                if ($effectiveFrom && $effectiveFrom > $dateString) {
+                    return false;
+                }
+
+                if ($effectiveTo && $effectiveTo < $dateString) {
+                    return false;
+                }
+
+                return true;
+            })
+            ->sortByDesc(fn (Schedule $schedule) => $schedule->department_id !== null)
+            ->sortByDesc(fn (Schedule $schedule) => $schedule->effective_from ? $schedule->effective_from->toDateString() : '')
+            ->first(function (Schedule $schedule) use ($dayOfWeek) {
+                return $this->worksOnDay($schedule, $dayOfWeek);
+            });
+    }
+
+    private function loadCompanySchedules(string $dateString): Collection
+    {
         return Schedule::forCompany($this->company_id)
             ->where('is_active', true)
-            ->where(function ($q) {
-                $q->where('department_id', $this->department_id)
-                    ->orWhereNull('department_id');
-            })
+            ->with('shift')
             ->where(function ($q) use ($dateString) {
                 $q->whereNull('effective_from')
                     ->orWhere('effective_from', '<=', $dateString);
@@ -78,10 +122,7 @@ class Employee extends Model
             })
             ->orderByRaw('department_id IS NOT NULL DESC')
             ->orderByDesc('effective_from')
-            ->get()
-            ->first(function ($schedule) use ($dayOfWeek) {
-                return $this->worksOnDay($schedule, $dayOfWeek);
-            });
+            ->get();
     }
 
     private function worksOnDay(Schedule $schedule, int $dayOfWeek): bool

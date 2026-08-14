@@ -5,14 +5,20 @@ namespace App\Services;
 use App\Models\Employee;
 use App\Models\Schedule;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 class AttendanceStatusService
 {
     public const NO_SCHEDULE = 'no schedule';
+
     public const ABSENT = 'absent';
+
     public const ON_TIME = 'on time';
+
     public const LATE = 'late';
+
     public const EARLY_LEAVE = 'early leave';
+
     public const LATE_EARLY_LEAVE = 'late & early leave';
 
     /**
@@ -20,9 +26,9 @@ class AttendanceStatusService
      * Prefers an explicit employee assignment, then falls back to the
      * department-level (or company-wide) schedule.
      */
-    public function resolveSchedule(Employee $employee, Carbon $date): ?Schedule
+    public function resolveSchedule(Employee $employee, Carbon $date, ?Collection $companySchedules = null): ?Schedule
     {
-        return $employee->scheduleForDate($date);
+        return $employee->scheduleForDate($date, $companySchedules);
     }
 
     /**
@@ -34,12 +40,12 @@ class AttendanceStatusService
     {
         $shift = $schedule->shift;
 
-        if (!$shift) {
+        if (! $shift) {
             return ['start' => null, 'end' => null];
         }
 
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date->toDateString() . ' ' . $shift->start_time);
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date->toDateString() . ' ' . $shift->end_time);
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date->toDateString().' '.$shift->start_time);
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date->toDateString().' '.$shift->end_time);
 
         if ($end <= $start) {
             $end->addDay();
@@ -49,15 +55,45 @@ class AttendanceStatusService
     }
 
     /**
+     * Load every active schedule (with shift) that applies on the given date
+     * for the given companies, so callers can resolve schedules for many
+     * employees without issuing per-employee queries.
+     *
+     * @param  int[]  $companyIds
+     */
+    public function companySchedulesForDate(array $companyIds, Carbon $date): Collection
+    {
+        if (empty($companyIds)) {
+            return collect();
+        }
+
+        $dateString = $date->toDateString();
+
+        return Schedule::query()
+            ->whereIn('company_id', $companyIds)
+            ->where('is_active', true)
+            ->with('shift')
+            ->where(function ($q) use ($dateString) {
+                $q->whereNull('effective_from')
+                    ->orWhere('effective_from', '<=', $dateString);
+            })
+            ->where(function ($q) use ($dateString) {
+                $q->whereNull('effective_to')
+                    ->orWhere('effective_to', '>=', $dateString);
+            })
+            ->get();
+    }
+
+    /**
      * Determine the attendance status for an employee on a date.
      *
      * @return array{status: string, schedule: Schedule|null, scheduled_in: Carbon|null, scheduled_out: Carbon|null}
      */
-    public function statusFor(Employee $employee, Carbon $date, ?Carbon $firstIn, ?Carbon $lastOut): array
+    public function statusFor(Employee $employee, Carbon $date, ?Carbon $firstIn, ?Carbon $lastOut, ?Schedule $schedule = null, ?Collection $companySchedules = null): array
     {
-        $schedule = $this->resolveSchedule($employee, $date);
+        $schedule ??= $this->resolveSchedule($employee, $date, $companySchedules);
 
-        if (!$schedule) {
+        if (! $schedule) {
             return [
                 'status' => self::NO_SCHEDULE,
                 'schedule' => null,
@@ -71,7 +107,7 @@ class AttendanceStatusService
         $scheduledOut = $times['end'];
         $shift = $schedule->shift;
 
-        if (!$firstIn) {
+        if (! $firstIn) {
             return [
                 'status' => self::ABSENT,
                 'schedule' => $schedule,

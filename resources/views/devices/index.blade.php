@@ -146,6 +146,12 @@
                                 pattern="[0-9]{4,8}" maxlength="8" placeholder="Leave blank to keep current key">
                             <div class="form-text">Must match the communication key configured on the device.</div>
                         </div>
+                        <div class="mb-3 form-check form-switch">
+                            <input type="checkbox" class="form-check-input" name="comm_key_enforce" value="1"
+                                id="commKeyEnforce{{ $d->id }}" @checked($d->comm_key_enforce)>
+                            <label class="form-check-label" for="commKeyEnforce{{ $d->id }}">Enforce comm key on data pushes</label>
+                            <div class="form-text">Off = accept pushes without a key (needed for devices that don't send one).</div>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>

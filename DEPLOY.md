@@ -112,7 +112,13 @@ DB_DATABASE=adms
 DB_USERNAME=adms
 DB_PASSWORD=STRONG_PASSWORD
 
-QUEUE_CONNECTION=sync
+QUEUE_CONNECTION=database
+
+# Keep device I/O off the hot path. Full per-request debug dumps and DB
+# logging are opt-in; enable only while troubleshooting a specific device.
+ICLOCK_DEBUG=false
+ICLOCK_LOG_HANDSHAKES=false
+ICLOCK_LOG_PUNCHES=false
 ```
 
 Generate the app key and run migrations/seeders:
@@ -123,9 +129,12 @@ php artisan migrate --force
 php artisan db:seed --force
 ```
 
-> Note: `QUEUE_CONNECTION=sync` means attendance staging is processed inline on
-> each device POST, so no queue worker is required. If you later switch to a
-> database queue, run `php artisan queue:work` under a service manager.
+> Note: `QUEUE_CONNECTION=database` moves attendance-staging processing off the
+> device HTTP request into the `jobs` table, so device endpoints respond
+> instantly regardless of how many devices are pushing. Run queue workers (see
+> [section 5b](#5b-queue-workers-and-scheduler) below). If no worker is running,
+> the `attendance:process-staging` command is scheduled as a fallback and must
+> be triggered by cron (see below).
 
 ## 5. Cache config and fix permissions
 
@@ -136,6 +145,71 @@ php artisan view:cache
 
 sudo chown -R www-data:www-data storage bootstrap/cache
 ```
+
+## 5b. Queue workers and scheduler
+
+Attendance staging is processed by background queue workers. Run **at least one
+worker per expected number of simultaneously-pushing devices** (a common choice
+is 4–8). The worker pulls batches from the `jobs` table and processes them
+concurrently without blocking the device HTTP endpoints.
+
+Create a systemd service:
+
+```bash
+sudo nano /etc/systemd/system/adms-queue.service
+```
+
+```ini
+[Unit]
+Description=ADMS queue worker
+After=network.target mysql.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/adms
+ExecStart=/usr/bin/php /var/www/adms/artisan queue:work database --tries=3 --max-time=3600
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+For multiple workers, start N copies with `systemctl` template units or
+Supervisor. Example with `supervisord`:
+
+```ini
+[program:adms-queue]
+command=php /var/www/adms/artisan queue:work database --tries=3 --max-time=3600
+directory=/var/www/adms
+user=www-data
+numprocs=4
+process_name=%(program_name)s_%(process_num)d
+autorestart=true
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now adms-queue.service
+# check: sudo journalctl -u adms-queue -f
+```
+
+**Scheduler fallback** — even with workers running, install the Laravel scheduler
+so the `attendance:process-staging` fallback fires (reclaims rows a worker may
+have missed):
+
+```bash
+crontab -e
+# add:
+* * * * * cd /var/www/adms && php artisan schedule:run >> /dev/null 2>&1
+```
+
+On Windows/XAMPP, start the included worker script instead:
+`scripts/start-queue-workers.ps1` (launches N background workers), and create a
+Task Scheduler task to run `php artisan schedule:run` every minute.
 
 ## 6. Configure Apache
 
@@ -306,6 +380,7 @@ sudo chown -R www-data:www-data storage bootstrap/cache
 # 8. Restart/reload services to pick up the new code
 sudo systemctl reload apache2        # or: sudo systemctl restart apache2
 sudo systemctl reload php8.*-fpm     # only if using PHP-FPM (clears opcache)
+sudo systemctl restart adms-queue    # restart queue workers
 ```
 
 ### After the upgrade

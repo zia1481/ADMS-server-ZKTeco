@@ -2,18 +2,15 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use App\Models\Employee;
 use App\Models\FingerLog;
 use App\Models\PendingDevice;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class iclockController extends Controller
 {
-    public function __invoke(Request $request)
-    {
-    }
+    public function __invoke(Request $request) {}
 
     // handshake
     public function handshake(Request $request)
@@ -22,50 +19,107 @@ class iclockController extends Controller
 
         $this->logHandshake($request);
 
+        $this->debugLog('HANDSHAKE', [
+            'sn' => $sn,
+            'request' => $request->all(),
+            'ip' => $request->ip(),
+            'body' => $request->getContent(),
+        ]);
+
         $device = DB::table('devices')->where('no_sn', $sn)->first();
 
-        if (!$this->commKeyAccepted($request, $device)) {
-            return "ERROR: 0";
+        if (! $this->commKeyAccepted($request, $device)) {
+            $this->debugLog('HANDSHAKE REJECTED (comm key)', ['sn' => $sn]);
+
+            return 'ERROR: 0';
         }
 
         if ($device) {
             if ($device->status === 'blocked') {
-                return "ERROR: 0";
+                $this->debugLog('HANDSHAKE REJECTED (blocked)', ['sn' => $sn]);
+
+                return 'ERROR: 0';
             }
 
             DB::table('devices')->where('no_sn', $sn)->update(['online' => now()]);
 
-            if (!$device->company_id) {
+            if (! $device->company_id) {
                 $this->detectNewDevice($request);
             }
         } else {
             $this->detectNewDevice($request);
         }
 
-        return $this->buildHandshakeResponse($sn, $request->input('DeviceType'), $device);
+        $response = $this->buildHandshakeResponse($sn, $request->input('DeviceType'), $device);
+
+        $this->debugLog('HANDSHAKE RESPONSE', [
+            'sn' => $sn,
+            'response' => $response,
+        ]);
+
+        return $response;
     }
 
     public function receiveRecords(Request $request)
     {
         $sn = $request->input('SN') ?? ' ';
+        $table = strtoupper($request->input('table') ?? 'ATTLOG');
         $device = DB::table('devices')->where('no_sn', $sn)->first();
 
-        if (!$device) {
+        $this->debugLog('PUNCH DATA RECEIVED', [
+            'sn' => $sn,
+            'table' => $table,
+            'stamp' => $request->input('Stamp'),
+            'ip' => $request->ip(),
+            'presented_key' => $this->presentedCommKey($request),
+            'body' => $request->getContent(),
+        ]);
+
+        if (! $device) {
             $this->detectNewDevice($request);
 
-            return "ERROR: 0";
+            $this->debugLog('PUNCH REJECTED (unknown device)', ['sn' => $sn]);
+
+            return 'ERROR: 0';
         }
 
         if ($device->status === 'blocked') {
-            return "ERROR: 0";
+            $this->debugLog('PUNCH REJECTED (blocked)', ['sn' => $sn]);
+
+            return 'ERROR: 0';
         }
 
-        if (!$device->company_id) {
+        if (! $device->company_id) {
             $this->detectNewDevice($request);
         }
 
-        if (!$this->commKeyAccepted($request, $device, true)) {
-            return "ERROR: 0";
+        if ($table === 'OPTIONS') {
+            // ZKTeco devices push their options/capabilities right after the
+            // handshake WITHOUT the ComKey. Acknowledge it and move on; the
+            // device only carries the key on real data pushes (ATTLOG, etc).
+            $this->debugLog('DEVICE OPTIONS PUSH', [
+                'sn' => $sn,
+                'body' => $request->getContent(),
+            ]);
+
+            return 'OK: 0';
+        }
+
+        if ($device->comm_key_enforce && ! $this->commKeyAccepted($request, $device, true)) {
+            $this->debugLog('PUNCH REJECTED (comm key)', ['sn' => $sn]);
+
+            return 'ERROR: 0';
+        }
+
+        if ($table !== 'ATTLOG') {
+            // Non-attendance tables (OPERLOG, OPTLOG, USER, FP, FACE, ...) are
+            // acknowledged so the device clears its buffer, but not parsed.
+            $this->debugLog('NON-ATTLOG DATA PUSH ACKED', [
+                'sn' => $sn,
+                'table' => $table,
+            ]);
+
+            return 'OK: 0';
         }
 
         $maxLength = 6550;
@@ -74,10 +128,12 @@ class iclockController extends Controller
             $body = substr($body, 0, $maxLength);
         }
         // Log the incoming request
-        FingerLog::create([
-            'url' => json_encode($request->all()),
-            'data' => $body,
-        ]);
+        if ($this->logPunches()) {
+            FingerLog::create([
+                'url' => json_encode($request->all()),
+                'data' => $body,
+            ]);
+        }
 
         try {
             $arr = preg_split('/\\r\\n|\\r|\\n/', $request->getContent());
@@ -90,7 +146,12 @@ class iclockController extends Controller
                 }
 
                 $data = explode("\t", $record);
-                if (!empty($data) && isset($data[0]) && is_numeric($data[0])) {
+                if (! empty($data) && isset($data[0]) && is_numeric($data[0])) {
+                    $this->debugLog('PUNCH', [
+                        'sn' => $sn,
+                        'record' => $record,
+                        'fields' => $data,
+                    ]);
                     $staging[] = [
                         'sn' => $sn,
                         'device_id' => $device?->id,
@@ -100,23 +161,23 @@ class iclockController extends Controller
                         'payload' => $record,
                         'employee_id' => $data[0],
                         'punch_time' => $data[1] ?? null,
-                        'status1' => $this->validateAndFormatInteger($data[2]),
-                        'status2' => $this->validateAndFormatInteger($data[3]),
-                        'status3' => $this->validateAndFormatInteger($data[4]),
-                        'status4' => $this->validateAndFormatInteger($data[5]),
-                        'status5' => $this->validateAndFormatInteger($data[6]),
+                        'status1' => $this->validateAndFormatInteger($data[2] ?? null),
+                        'status2' => $this->validateAndFormatInteger($data[3] ?? null),
+                        'status3' => $this->validateAndFormatInteger($data[4] ?? null),
+                        'status4' => $this->validateAndFormatInteger($data[5] ?? null),
+                        'status5' => $this->validateAndFormatInteger($data[6] ?? null),
                         'state' => 'pending',
                         'created_at' => now(),
                         'updated_at' => now(),
                     ];
                     $tot++;
                 } else {
-                    Log::info('Invalid or incomplete data: ' . $record);
+                    Log::info('Invalid or incomplete data: '.$record);
                 }
             }
 
             // Perform batch insert into staging table
-            if (!empty($staging)) {
+            if (! empty($staging)) {
                 DB::table('attendance_staging')->insert($staging);
 
                 // Advance the device's stored stamp to the newest record received so
@@ -135,15 +196,25 @@ class iclockController extends Controller
                 \App\Jobs\ProcessAttendanceStaging::dispatch();
             }
 
-            return "OK: " . $tot; // Success response
+            $this->debugLog('PUNCH ACCEPTED', [
+                'sn' => $sn,
+                'count' => $tot,
+            ]);
+
+            return 'OK: '.$tot; // Success response
         } catch (\Exception $e) {
+            $this->debugLog('PUNCH ERROR', [
+                'sn' => $sn,
+                'error' => $e->getMessage(),
+            ]);
             $errorData = [
-                'data' => $e->getMessage() . '::Line::' . $e->getLine(),
+                'data' => $e->getMessage().'::Line::'.$e->getLine(),
                 'created_at' => now(),
-                'updated_at' => now()
+                'updated_at' => now(),
             ];
             DB::table('error_log')->insert($errorData);
             Log::error($e);
+
             return "ERROR: 0\n";
         }
     }
@@ -153,16 +224,18 @@ class iclockController extends Controller
         $sn = $request->input('SN');
         $device = $sn ? DB::table('devices')->where('no_sn', $sn)->first() : null;
 
-        if (!$this->commKeyAccepted($request, $device)) {
-            return "ERROR: 0";
+        if (! $this->commKeyAccepted($request, $device)) {
+            return 'ERROR: 0';
         }
 
-        DB::table('finger_log')->insert([
-            'data' => $request->getContent(),
-            'url' => $request->fullUrl(),
-        ]);
+        if ($this->logPunches()) {
+            DB::table('finger_log')->insert([
+                'data' => $request->getContent(),
+                'url' => $request->fullUrl(),
+            ]);
+        }
 
-        return "OK";
+        return 'OK';
     }
 
     public function getrequest(Request $request)
@@ -171,21 +244,21 @@ class iclockController extends Controller
 
         $device = DB::table('devices')->where('no_sn', $sn)->first();
 
-        if (!$this->commKeyAccepted($request, $device)) {
-            return "ERROR: 0";
+        if (! $this->commKeyAccepted($request, $device)) {
+            return 'ERROR: 0';
         }
 
         if ($device) {
             DB::table('devices')->where('no_sn', $sn)->update(['online' => now()]);
 
-            if (!$device->company_id) {
+            if (! $device->company_id) {
                 $this->detectNewDevice($request);
             }
         } else {
             $this->detectNewDevice($request);
         }
 
-        return "OK";
+        return 'OK';
     }
 
     /**
@@ -196,7 +269,7 @@ class iclockController extends Controller
     {
         $sn = $request->input('SN');
 
-        if (!$sn) {
+        if (! $sn) {
             return;
         }
 
@@ -231,12 +304,35 @@ class iclockController extends Controller
                 ]);
             }
         } catch (\Exception $e) {
-            Log::error('Failed to detect new device: ' . $e->getMessage());
+            Log::error('Failed to detect new device: '.$e->getMessage());
         }
+    }
+
+    private function debugLog(string $message, array $context = []): void
+    {
+        if (! filter_var(env('ICLOCK_DEBUG', false), FILTER_VALIDATE_BOOLEAN)) {
+            return;
+        }
+
+        Log::channel('iclock')->debug($message, $context);
+    }
+
+    private function logHandshakes(): bool
+    {
+        return filter_var(env('ICLOCK_LOG_HANDSHAKES', false), FILTER_VALIDATE_BOOLEAN);
+    }
+
+    private function logPunches(): bool
+    {
+        return filter_var(env('ICLOCK_LOG_PUNCHES', false), FILTER_VALIDATE_BOOLEAN);
     }
 
     private function logHandshake(Request $request): void
     {
+        if (! $this->logHandshakes()) {
+            return;
+        }
+
         $data = [
             'url' => json_encode($request->all()),
             'data' => $request->getContent(),
@@ -271,27 +367,27 @@ class iclockController extends Controller
         $realtime = $config->realtime ?? true;
         $encrypt = $config->encrypt ?? false;
 
-        $r = "GET OPTION FROM: {$sn}\r\n" .
-            "Stamp={$stamp}\r\n" .
-            "OpStamp=" . time() . "\r\n" .
-            "ErrorDelay={$errorDelay}\r\n" .
-            "Delay={$delay}\r\n" .
-            "ResLogDay={$resLogDay}\r\n" .
-            "ResLogDelCount={$resLogDelCount}\r\n" .
-            "ResLogCount={$resLogCount}\r\n" .
-            "TransTimes={$transTimes}\r\n" .
-            "TransInterval={$transInterval}\r\n" .
+        $r = "GET OPTION FROM: {$sn}\r\n".
+            "Stamp={$stamp}\r\n".
+            'OpStamp='.time()."\r\n".
+            "ErrorDelay={$errorDelay}\r\n".
+            "Delay={$delay}\r\n".
+            "ResLogDay={$resLogDay}\r\n".
+            "ResLogDelCount={$resLogDelCount}\r\n".
+            "ResLogCount={$resLogCount}\r\n".
+            "TransTimes={$transTimes}\r\n".
+            "TransInterval={$transInterval}\r\n".
             "TransFlag={$transFlag}\r\n";
 
         if ($timeZone) {
             $r .= "TimeZone={$timeZone}\r\n";
         }
 
-        $r .= "Realtime=" . ($realtime ? 1 : 0) . "\r\n" .
-            "Encrypt=" . ($encrypt ? 1 : 0);
+        $r .= 'Realtime='.($realtime ? 1 : 0)."\r\n".
+            'Encrypt='.($encrypt ? 1 : 0);
 
-        if ($device && !empty($device->comm_key)) {
-            $r .= "\r\nIsPushComKey=1\r\nPushComKey=" . $device->comm_key;
+        if ($device && ! empty($device->comm_key)) {
+            $r .= "\r\nIsPushComKey=1\r\nPushComKey=".$device->comm_key;
         }
 
         return $r;
@@ -341,14 +437,14 @@ class iclockController extends Controller
      */
     private function commKeyAccepted(Request $request, ?object $device, bool $strict = false): bool
     {
-        if (!$device) {
-            return !$strict;
+        if (! $device) {
+            return ! $strict;
         }
 
         $stored = $device->comm_key ?? null;
 
         if ($stored === null || $stored === '') {
-            return !$strict;
+            return true;
         }
 
         $presented = $this->presentedCommKey($request);

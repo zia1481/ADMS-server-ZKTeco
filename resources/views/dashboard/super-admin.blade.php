@@ -120,6 +120,24 @@
                     </div>
                 </div>
             </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title fs-6 fw-semibold"><i class="bi bi-receipt text-info me-2"></i>Device Logs</h5>
+                        <p class="card-text small text-muted mb-3">Raw communication log captured from the attendance devices.</p>
+                        <a href="{{ route('devices.DeviceLog') }}" class="btn btn-sm btn-info">View Device Logs</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title fs-6 fw-semibold"><i class="bi bi-fingerprint text-info me-2"></i>Finger Logs</h5>
+                        <p class="card-text small text-muted mb-3">Raw fingerprint communication log captured from the attendance devices.</p>
+                        <a href="{{ route('devices.FingerLog') }}" class="btn btn-sm btn-info">View Finger Logs</a>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>

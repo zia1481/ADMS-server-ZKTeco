@@ -10,8 +10,13 @@ class AttendanceStaging extends Model
     use HasFactory;
 
     public const STATE_PENDING = 'pending';
+
+    public const STATE_PROCESSING = 'processing';
+
     public const STATE_PROCESSED = 'processed';
+
     public const STATE_DUPLICATE = 'duplicate';
+
     public const STATE_REJECTED = 'rejected';
 
     protected $table = 'attendance_staging';
