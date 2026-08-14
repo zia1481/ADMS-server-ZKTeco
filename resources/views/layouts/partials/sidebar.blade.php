@@ -24,6 +24,14 @@ $active = function (...$names) use ($routeName) {
                 <i class="bi bi-speedometer2"></i>
                 <span class="sidebar-link-text">Dashboard</span>
             </a>
+
+            <div class="nav-section">Personnel</div>
+            <a href="{{ route('employees.index') }}"
+                class="sidebar-link {{ $active('employees.*') ? 'active' : '' }}"
+                title="Employees" data-bs-toggle="tooltip" data-bs-placement="right">
+                <i class="bi bi-people"></i>
+                <span class="sidebar-link-text">Employees</span>
+            </a>
         @endif
 
         <div class="nav-section">Attendance</div>

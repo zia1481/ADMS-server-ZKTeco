@@ -153,63 +153,151 @@ worker per expected number of simultaneously-pushing devices** (a common choice
 is 4–8). The worker pulls batches from the `jobs` table and processes them
 concurrently without blocking the device HTTP endpoints.
 
-Create a systemd service:
+Pick **exactly one** of the two options below — Supervisor (Option A, multiple
+workers) or systemd (Option B, single worker). Do **not** combine them: they use
+different config files, and a Supervisor `[program:...]` block pasted into a
+systemd unit file is silently ignored.
 
-```bash
-sudo nano /etc/systemd/system/adms-queue.service
-```
+> Before starting any worker, make sure the app is queue-ready:
+> - `QUEUE_CONNECTION=database` is set in `/var/www/adms/.env` (then re-run
+>   `php artisan config:cache`).
+> - The `jobs` table exists: `php artisan migrate --status` must show
+>   `2026_08_14_000001_create_jobs_table` as **Ran**.
+>
+> If the worker starts but attendance never appears, check these two things
+> first. See [Verify the worker](#verify-the-worker) below.
 
-```ini
-[Unit]
-Description=ADMS queue worker
-After=network.target mysql.service
+### Option A — Supervisor (recommended: several workers, one per device)
 
-[Service]
-User=www-data
-Group=www-data
-WorkingDirectory=/var/www/adms
-ExecStart=/usr/bin/php /var/www/adms/artisan queue:work database --tries=3 --max-time=3600
-Restart=always
-RestartSec=5
+1. Install Supervisor:
 
-[Install]
-WantedBy=multi-user.target
-```
+   ```bash
+   sudo apt update && sudo apt install -y supervisor
+   ```
 
-For multiple workers, start N copies with `systemctl` template units or
-Supervisor. Example with `supervisord`:
+2. Create **one** config file containing **only** the program block (this is a
+   Supervisor config, not a systemd file):
 
-```ini
-[program:adms-queue]
-command=php /var/www/adms/artisan queue:work database --tries=3 --max-time=3600
-directory=/var/www/adms
-user=www-data
-numprocs=4
-process_name=%(program_name)s_%(process_num)d
-autorestart=true
-```
+   ```bash
+   sudo nano /etc/supervisor/conf.d/adms-queue.conf
+   ```
 
-Enable and start:
+   ```ini
+   [program:adms-queue]
+   command=php /var/www/adms/artisan queue:work database --tries=3
+   directory=/var/www/adms
+   user=www-data
+   numprocs=4
+   process_name=%(program_name)s_%(process_num)d
+   autorestart=true
+   redirect_stderr=true
+   stdout_logfile=/var/log/adms-queue.log
+   ```
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now adms-queue.service
-# check: sudo journalctl -u adms-queue -f
-```
+   `numprocs` = number of workers (one per device expected to push
+   simultaneously). Do **not** pass `--max-time=3600` here — Supervisor keeps
+   each process running indefinitely and restarts it if it exits.
 
-**Scheduler fallback** — even with workers running, install the Laravel scheduler
-so the `attendance:process-staging` fallback fires (reclaims rows a worker may
-have missed):
+3. Load and start the workers:
+
+   ```bash
+   sudo supervisorctl reread
+   sudo supervisorctl update
+   sudo supervisorctl status          # expect 4 RUNNING lines
+   ```
+
+4. Watch worker activity:
+
+   ```bash
+   sudo supervisorctl tail -f adms-queue
+   ```
+
+### Option B — systemd (single worker)
+
+1. Create the unit file containing **only** `[Unit]`, `[Service]`, `[Install]`
+   sections:
+
+   ```bash
+   sudo nano /etc/systemd/system/adms-queue.service
+   ```
+
+   ```ini
+   [Unit]
+   Description=ADMS queue worker
+   After=network.target mysql.service
+
+   [Service]
+   User=www-data
+   Group=www-data
+   WorkingDirectory=/var/www/adms
+   ExecStart=/usr/bin/php /var/www/adms/artisan queue:work database --tries=3 --max-time=3600
+   Restart=always
+   RestartSec=5
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   With `--max-time=3600` the worker exits after an hour and systemd restarts it
+   (`RestartSec=5`), which bounds long-running memory growth. Remove
+   `--max-time=3600` if you prefer a single uninterrupted process.
+
+2. Enable and start it:
+
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now adms-queue.service
+   sudo systemctl status adms-queue    # expect active (running)
+   ```
+
+3. Watch worker activity:
+
+   ```bash
+   sudo journalctl -u adms-queue -f
+   ```
+
+   To run **multiple** workers with systemd, use a template unit
+   `adms-queue@.service` (`ExecStart=... %I` in `[Service]`) and enable it four
+   times: `sudo systemctl enable --now 'adms-queue@{1..4}.service'`. If you need
+   several workers, Option A is simpler.
+
+### Scheduler fallback
+
+Even with workers running, install the Laravel scheduler so the
+`attendance:process-staging` fallback fires (reclaims rows a worker may have
+missed, and acts as a safety net if no worker is running):
 
 ```bash
 crontab -e
-# add:
+# add this line:
 * * * * * cd /var/www/adms && php artisan schedule:run >> /dev/null 2>&1
 ```
 
 On Windows/XAMPP, start the included worker script instead:
 `scripts/start-queue-workers.ps1` (launches N background workers), and create a
 Task Scheduler task to run `php artisan schedule:run` every minute.
+
+### Verify the worker
+
+1. Confirm the app is pointing at the queue:
+
+   ```bash
+   cd /var/www/adms && php artisan tinker --execute="echo config('queue.default');"
+   # prints: database
+   ```
+
+2. After a device pushes attendance data, a job should appear and be consumed:
+
+   ```bash
+   mysql -u adms -p adms -e "SELECT COUNT(*) FROM jobs; SELECT state, COUNT(*) FROM attendance_staging GROUP BY state; SELECT COUNT(*) FROM attendances;"
+   ```
+
+   The `jobs` count should return to 0 quickly, staging rows should flip from
+   `pending` → `processed`, and `attendances` should grow.
+
+3. If the worker is running but nothing is processed, tail the worker log
+   (`sudo supervisorctl tail -f adms-queue` or `sudo journalctl -u adms-queue -f`)
+   and check `/var/www/adms/storage/logs/laravel.log` for errors.
 
 ## 6. Configure Apache
 
@@ -380,7 +468,12 @@ sudo chown -R www-data:www-data storage bootstrap/cache
 # 8. Restart/reload services to pick up the new code
 sudo systemctl reload apache2        # or: sudo systemctl restart apache2
 sudo systemctl reload php8.*-fpm     # only if using PHP-FPM (clears opcache)
-sudo systemctl restart adms-queue    # restart queue workers
+
+# Restart the queue worker(s):
+# - Supervisor (Option A):
+sudo supervisorctl restart adms-queue
+# - systemd (Option B):
+# sudo systemctl restart adms-queue.service
 ```
 
 ### After the upgrade

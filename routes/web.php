@@ -56,7 +56,15 @@ Route::middleware(['auth', 'changePwd'])->group(function () {
         Route::post('schedules', [ScheduleController::class, 'store'])->name('schedules.store');
         Route::post('schedules/{schedule}', [ScheduleController::class, 'update'])->name('schedules.update');
         Route::delete('schedules/{schedule}', [ScheduleController::class, 'destroy'])->name('schedules.destroy');
+    });
 
+    Route::middleware(['role:super_admin'])->group(function () {
+        Route::post('employees/import/test', [EmployeeController::class, 'importTest'])->name('employees.import.test');
+        Route::post('employees/import', [EmployeeController::class, 'import'])->name('employees.import');
+        Route::get('employees/export', [EmployeeController::class, 'export'])->name('employees.export');
+    });
+
+    Route::middleware(['role:company_admin,super_admin'])->group(function () {
         Route::get('employees', [EmployeeController::class, 'index'])->name('employees.index');
         Route::post('employees', [EmployeeController::class, 'store'])->name('employees.store');
         Route::post('employees/{employee}', [EmployeeController::class, 'update'])->name('employees.update');

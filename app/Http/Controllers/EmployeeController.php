@@ -2,11 +2,16 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\EmployeesExport;
 use App\Models\Company;
 use App\Models\Department;
 use App\Models\Employee;
 use App\Models\Schedule;
+use App\Services\EmployeeImportService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Maatwebsite\Excel\Facades\Excel;
 
 class EmployeeController extends Controller
 {
@@ -20,7 +25,7 @@ class EmployeeController extends Controller
             $query->where('employee_id', $request->employee_id);
         }
         if ($request->filled('name')) {
-            $query->where('name', 'like', $request->name . '%');
+            $query->where('name', 'like', $request->name.'%');
         }
         if ($request->filled('department_id')) {
             $query->where('department_id', $request->department_id);
@@ -99,6 +104,106 @@ class EmployeeController extends Controller
         return redirect()->route('employees.index')->with('success', 'Employee deleted successfully');
     }
 
+    public function importTest(Request $request)
+    {
+        $request->validate([
+            'company_id' => 'required|exists:companies,id',
+            'file' => 'required|file|mimes:csv,xlsx,txt',
+        ]);
+
+        try {
+            $rows = app(EmployeeImportService::class)->parse($request->file('file'));
+        } catch (\Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Could not read the file. '.$e->getMessage(),
+            ], 422);
+        }
+
+        if (empty($rows)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'The file is empty or contains no data rows.',
+            ], 422);
+        }
+
+        $report = app(EmployeeImportService::class)->validate($rows, (int) $request->input('company_id'));
+
+        return response()->json(['ok' => true] + $report);
+    }
+
+    public function import(Request $request)
+    {
+        $request->validate([
+            'company_id' => 'required|exists:companies,id',
+            'file' => 'required|file|mimes:csv,xlsx,txt',
+        ]);
+
+        $service = app(EmployeeImportService::class);
+
+        try {
+            $rows = $service->parse($request->file('file'));
+        } catch (\Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Could not read the file. '.$e->getMessage(),
+            ], 422);
+        }
+
+        if (empty($rows)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'The file is empty or contains no data rows.',
+            ], 422);
+        }
+
+        $report = $service->validate($rows, (int) $request->input('company_id'));
+
+        $imported = 0;
+        DB::transaction(function () use ($report, &$imported) {
+            foreach ($report['rows'] as $row) {
+                if ($row['status'] !== 'valid' || $row['data'] === null) {
+                    continue;
+                }
+
+                Employee::create($row['data']);
+                $imported++;
+            }
+        });
+
+        if ($imported > 0) {
+            session()->flash('success', "Imported {$imported} employee".($imported === 1 ? '' : 's').' successfully.');
+        } elseif ($report['invalid'] > 0) {
+            session()->flash('failed', "No employees were imported. {$report['invalid']} row(s) failed validation.");
+        } else {
+            session()->flash('failed', 'No employees were imported.');
+        }
+
+        return response()->json(['ok' => true] + $report + ['imported' => $imported]);
+    }
+
+    public function export(Request $request)
+    {
+        $request->validate([
+            'company_id' => 'required|exists:companies,id',
+            'format' => 'nullable|in:csv,xlsx',
+        ]);
+
+        $companyId = (int) $request->input('company_id');
+        $format = $request->input('format', 'csv');
+
+        $query = Employee::forCompany($companyId)
+            ->with('department')
+            ->orderBy('name');
+
+        $companyName = Company::where('id', $companyId)->value('name') ?? 'company';
+
+        $extension = $format === 'xlsx' ? 'xlsx' : 'csv';
+        $filename = 'employees-'.Str::slug($companyName).'-'.now()->format('Ymd_His').'.'.$extension;
+
+        return Excel::download(new EmployeesExport($query), $filename);
+    }
+
     protected function syncScheduleAssignments(Employee $employee, array $assignments): void
     {
         $companyId = $employee->company_id;
@@ -109,7 +214,7 @@ class EmployeeController extends Controller
         foreach ($assignments as $assignment) {
             $scheduleId = $assignment['schedule_id'] ?? null;
 
-            if (!$scheduleId || !$allowed->has($scheduleId)) {
+            if (! $scheduleId || ! $allowed->has($scheduleId)) {
                 continue;
             }
 
@@ -138,7 +243,7 @@ class EmployeeController extends Controller
 
     protected function authorizeCompany(int $companyId): void
     {
-        if (!auth()->user()->isSuperAdmin() && auth()->user()->company_id !== $companyId) {
+        if (! auth()->user()->isSuperAdmin() && auth()->user()->company_id !== $companyId) {
             abort(403);
         }
     }
