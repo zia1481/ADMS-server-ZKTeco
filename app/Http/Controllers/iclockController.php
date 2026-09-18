@@ -26,10 +26,42 @@ class iclockController extends Controller
             'body' => $request->getContent(),
         ]);
 
+        $this->recordIclock('ICLOCK REQUEST', [
+            'method' => $request->method(),
+            'path' => $request->path(),
+            'sn' => $sn,
+            'ip' => $request->ip(),
+            'device_type' => $request->input('DeviceType'),
+            'fw_version' => $request->input('FWVersion'),
+            'presented_key' => $this->presentedCommKey($request),
+        ]);
+
+        if (trim($sn) === '') {
+            $this->recordIclock('ICLOCK MISSING SN', [
+                'method' => $request->method(),
+                'path' => $request->path(),
+                'ip' => $request->ip(),
+            ]);
+        }
+
         $device = DB::table('devices')->where('no_sn', $sn)->first();
+
+        $this->recordIclock('ICLOCK DEVICE LOOKUP', [
+            'sn' => $sn,
+            'found' => (bool) $device,
+            'device_id' => $device?->id,
+            'company_id' => $device?->company_id,
+            'status' => $device?->status,
+        ]);
 
         if (! $this->commKeyAccepted($request, $device)) {
             $this->debugLog('HANDSHAKE REJECTED (comm key)', ['sn' => $sn]);
+            $this->recordIclock('ICLOCK REJECTED', [
+                'sn' => $sn,
+                'reason' => 'comm_key',
+                'device_id' => $device?->id,
+                'presented_key' => $this->presentedCommKey($request),
+            ]);
 
             return 'ERROR: 0';
         }
@@ -37,17 +69,34 @@ class iclockController extends Controller
         if ($device) {
             if ($device->status === 'blocked') {
                 $this->debugLog('HANDSHAKE REJECTED (blocked)', ['sn' => $sn]);
+                $this->recordIclock('ICLOCK REJECTED', [
+                    'sn' => $sn,
+                    'reason' => 'blocked',
+                    'device_id' => $device->id,
+                ]);
 
                 return 'ERROR: 0';
             }
 
             if ($this->companyDisabled($device->company_id)) {
                 $this->debugLog('HANDSHAKE REJECTED (company disabled)', ['sn' => $sn]);
+                $this->recordIclock('ICLOCK REJECTED', [
+                    'sn' => $sn,
+                    'reason' => 'company_disabled',
+                    'device_id' => $device->id,
+                    'company_id' => $device->company_id,
+                ]);
 
                 return 'ERROR: 0';
             }
 
             DB::table('devices')->where('no_sn', $sn)->update(['online' => now()]);
+
+            $this->recordIclock('ICLOCK HEARTBEAT', [
+                'sn' => $sn,
+                'device_id' => $device->id,
+                'company_id' => $device->company_id,
+            ]);
 
             if (! $device->company_id) {
                 $this->detectNewDevice($request);
@@ -61,6 +110,14 @@ class iclockController extends Controller
         $this->debugLog('HANDSHAKE RESPONSE', [
             'sn' => $sn,
             'response' => $response,
+        ]);
+
+        $this->recordIclock('ICLOCK RESPONSE', [
+            'sn' => $sn,
+            'handshake' => true,
+            'device_id' => $device?->id,
+            'accepted' => true,
+            'response' => str_starts_with($response, 'ERROR') ? trim($response) : 'OK',
         ]);
 
         return $response;
@@ -81,22 +138,50 @@ class iclockController extends Controller
             'body' => $request->getContent(),
         ]);
 
+        $this->recordIclock('ICLOCK REQUEST', [
+            'method' => $request->method(),
+            'path' => $request->path(),
+            'sn' => $sn,
+            'ip' => $request->ip(),
+            'table' => $table,
+            'stamp' => $request->input('Stamp'),
+            'presented_key' => $this->presentedCommKey($request),
+        ]);
+
         if (! $device) {
             $this->detectNewDevice($request);
 
             $this->debugLog('PUNCH REJECTED (unknown device)', ['sn' => $sn]);
+            $this->recordIclock('ICLOCK REJECTED', [
+                'sn' => $sn,
+                'reason' => 'unknown_device',
+                'table' => $table,
+            ]);
 
             return 'ERROR: 0';
         }
 
         if ($device->status === 'blocked') {
             $this->debugLog('PUNCH REJECTED (blocked)', ['sn' => $sn]);
+            $this->recordIclock('ICLOCK REJECTED', [
+                'sn' => $sn,
+                'reason' => 'blocked',
+                'table' => $table,
+                'device_id' => $device->id,
+            ]);
 
             return 'ERROR: 0';
         }
 
         if ($this->companyDisabled($device->company_id)) {
             $this->debugLog('PUNCH REJECTED (company disabled)', ['sn' => $sn]);
+            $this->recordIclock('ICLOCK REJECTED', [
+                'sn' => $sn,
+                'reason' => 'company_disabled',
+                'table' => $table,
+                'device_id' => $device->id,
+                'company_id' => $device->company_id,
+            ]);
 
             return 'ERROR: 0';
         }
@@ -113,12 +198,23 @@ class iclockController extends Controller
                 'sn' => $sn,
                 'body' => $request->getContent(),
             ]);
+            $this->recordIclock('ICLOCK OPTIONS PUSH', [
+                'sn' => $sn,
+                'device_id' => $device->id,
+            ]);
 
             return 'OK: 0';
         }
 
         if ($device->comm_key_enforce && ! $this->commKeyAccepted($request, $device, true)) {
             $this->debugLog('PUNCH REJECTED (comm key)', ['sn' => $sn]);
+            $this->recordIclock('ICLOCK REJECTED', [
+                'sn' => $sn,
+                'reason' => 'comm_key',
+                'table' => $table,
+                'device_id' => $device->id,
+                'presented_key' => $this->presentedCommKey($request),
+            ]);
 
             return 'ERROR: 0';
         }
@@ -129,6 +225,11 @@ class iclockController extends Controller
             $this->debugLog('NON-ATTLOG DATA PUSH ACKED', [
                 'sn' => $sn,
                 'table' => $table,
+            ]);
+            $this->recordIclock('ICLOCK NON-ATTLOG PUSH', [
+                'sn' => $sn,
+                'table' => $table,
+                'device_id' => $device->id,
             ]);
 
             return 'OK: 0';
@@ -212,11 +313,23 @@ class iclockController extends Controller
                 'sn' => $sn,
                 'count' => $tot,
             ]);
+            $this->recordIclock('ICLOCK PUNCH ACCEPTED', [
+                'sn' => $sn,
+                'table' => $table,
+                'device_id' => $device->id,
+                'count' => $tot,
+            ]);
 
             return 'OK: '.$tot; // Success response
         } catch (\Exception $e) {
             $this->debugLog('PUNCH ERROR', [
                 'sn' => $sn,
+                'error' => $e->getMessage(),
+            ]);
+            $this->recordIclock('ICLOCK PUNCH ERROR', [
+                'sn' => $sn,
+                'table' => $table,
+                'device_id' => $device->id,
                 'error' => $e->getMessage(),
             ]);
             $errorData = [
@@ -236,13 +349,43 @@ class iclockController extends Controller
         $sn = $request->input('SN');
         $device = $sn ? DB::table('devices')->where('no_sn', $sn)->first() : null;
 
+        $this->recordIclock('ICLOCK REQUEST', [
+            'method' => $request->method(),
+            'path' => $request->path(),
+            'sn' => $sn,
+            'ip' => $request->ip(),
+            'device_type' => $request->input('DeviceType'),
+            'presented_key' => $this->presentedCommKey($request),
+        ]);
+
         if (! $this->commKeyAccepted($request, $device)) {
+            $this->recordIclock('ICLOCK REJECTED', [
+                'sn' => $sn,
+                'reason' => 'comm_key',
+                'device_id' => $device?->id,
+                'presented_key' => $this->presentedCommKey($request),
+            ]);
+
             return 'ERROR: 0';
         }
 
         if ($device && $this->companyDisabled($device->company_id)) {
+            $this->recordIclock('ICLOCK REJECTED', [
+                'sn' => $sn,
+                'reason' => 'company_disabled',
+                'device_id' => $device->id,
+                'company_id' => $device->company_id,
+            ]);
+
             return 'ERROR: 0';
         }
+
+        $this->recordIclock('ICLOCK RESPONSE', [
+            'sn' => $sn,
+            'device_id' => $device?->id,
+            'accepted' => true,
+            'response' => 'OK',
+        ]);
 
         if ($this->logPunches()) {
             DB::table('finger_log')->insert([
@@ -258,18 +401,47 @@ class iclockController extends Controller
     {
         $sn = $request->input('SN');
 
+        $this->recordIclock('ICLOCK REQUEST', [
+            'method' => $request->method(),
+            'path' => $request->path(),
+            'sn' => $sn,
+            'ip' => $request->ip(),
+            'device_type' => $request->input('DeviceType'),
+            'presented_key' => $this->presentedCommKey($request),
+        ]);
+
         $device = DB::table('devices')->where('no_sn', $sn)->first();
 
         if (! $this->commKeyAccepted($request, $device)) {
+            $this->recordIclock('ICLOCK REJECTED', [
+                'sn' => $sn,
+                'reason' => 'comm_key',
+                'device_id' => $device?->id,
+                'presented_key' => $this->presentedCommKey($request),
+            ]);
+
             return 'ERROR: 0';
         }
 
         if ($device && $this->companyDisabled($device->company_id)) {
+            $this->recordIclock('ICLOCK REJECTED', [
+                'sn' => $sn,
+                'reason' => 'company_disabled',
+                'device_id' => $device->id,
+                'company_id' => $device->company_id,
+            ]);
+
             return 'ERROR: 0';
         }
 
         if ($device) {
             DB::table('devices')->where('no_sn', $sn)->update(['online' => now()]);
+
+            $this->recordIclock('ICLOCK HEARTBEAT', [
+                'sn' => $sn,
+                'device_id' => $device->id,
+                'company_id' => $device->company_id,
+            ]);
 
             if (! $device->company_id) {
                 $this->detectNewDevice($request);
@@ -277,6 +449,13 @@ class iclockController extends Controller
         } else {
             $this->detectNewDevice($request);
         }
+
+        $this->recordIclock('ICLOCK RESPONSE', [
+            'sn' => $sn,
+            'device_id' => $device?->id,
+            'accepted' => true,
+            'response' => 'OK',
+        ]);
 
         return 'OK';
     }
@@ -290,6 +469,11 @@ class iclockController extends Controller
         $sn = $request->input('SN');
 
         if (! $sn) {
+            $this->recordIclock('ICLOCK SKIP DETECTION', [
+                'reason' => 'missing_sn',
+                'ip' => $request->ip(),
+            ]);
+
             return;
         }
 
@@ -308,8 +492,17 @@ class iclockController extends Controller
                         'options' => $existing->options ?: json_encode($request->all()),
                         'state' => $existing->state ?: PendingDevice::STATE_DETECTED,
                     ]);
+
+                $this->recordIclock('ICLOCK NEW DEVICE UPDATED', [
+                    'pending_id' => $existing->id,
+                    'sn' => $sn,
+                    'model' => $existing->model ?: $request->input('DeviceType'),
+                    'fw_ver' => $existing->fw_ver ?: $request->input('FWVersion'),
+                    'ip' => $request->ip(),
+                    'state' => $existing->state ?: PendingDevice::STATE_DETECTED,
+                ]);
             } else {
-                DB::table('pending_devices')->insert([
+                $pendingId = DB::table('pending_devices')->insertGetId([
                     'sn' => $sn,
                     'ip_address' => $request->ip(),
                     'model' => $request->input('DeviceType'),
@@ -322,10 +515,29 @@ class iclockController extends Controller
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
+
+                $this->recordIclock('ICLOCK NEW DEVICE DETECTED', [
+                    'pending_id' => $pendingId,
+                    'sn' => $sn,
+                    'model' => $request->input('DeviceType'),
+                    'fw_ver' => $request->input('FWVersion'),
+                    'push_ver' => $request->input('pushver'),
+                    'ip' => $request->ip(),
+                    'state' => PendingDevice::STATE_DETECTED,
+                ]);
             }
         } catch (\Exception $e) {
             Log::error('Failed to detect new device: '.$e->getMessage());
+            Log::channel('iclock')->error('ICLOCK NEW DEVICE FAILED', [
+                'sn' => $sn,
+                'error' => $e->getMessage(),
+            ]);
         }
+    }
+
+    private function recordIclock(string $event, array $context = []): void
+    {
+        Log::channel('iclock')->info($event, $context);
     }
 
     private function debugLog(string $message, array $context = []): void

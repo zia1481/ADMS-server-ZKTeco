@@ -238,7 +238,16 @@ class DeviceController extends Controller
     {
         $data['lable'] = 'Devices Log';
         $perPage = 10;
-        $data['log'] = DB::table('device_log')->select('id', 'data', 'url')->orderBy('id', 'DESC')->paginate($perPage);
+
+        $query = DB::table('device_log')
+            ->select('id', 'data', 'url', 'sn', 'option', 'created_at');
+
+        if ($request->filled('sn')) {
+            $query->where('sn', 'like', '%'.$request->input('sn').'%');
+        }
+
+        $data['log'] = $query->orderBy('id', 'DESC')->paginate($perPage)->withQueryString();
+        $data['filter_sn'] = $request->input('sn');
 
         return view('devices.log', $data);
     }

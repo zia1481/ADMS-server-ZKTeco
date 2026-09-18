@@ -17,8 +17,8 @@ class UserSeeder extends Seeder
         $companyId = DB::table('companies')->where('code', 'DEFAULT')->value('id');
 
         DB::table('users')->insertOrIgnore([
-            'name' => 'Administrator',
-            'email' => 'admin@adms.com',
+            'name' => 'John Doe',
+            'email' => 'john.doe@example.com',
             'password' => Hash::make('password'),
             'is_admin' => true,
             'role' => User::ROLE_SUPER_ADMIN,
@@ -26,8 +26,8 @@ class UserSeeder extends Seeder
         ]);
 
         DB::table('users')->insertOrIgnore([
-            'name' => 'Manager',
-            'email' => 'manager@adms.com',
+            'name' => 'John koye',
+            'email' => 'john.koye@example.com',
             'password' => Hash::make('password'),
             'is_admin' => false,
             'role' => User::ROLE_COMPANY_ADMIN,

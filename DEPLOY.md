@@ -114,8 +114,9 @@ DB_PASSWORD=STRONG_PASSWORD
 
 QUEUE_CONNECTION=database
 
-# Keep device I/O off the hot path. Full per-request debug dumps and DB
-# logging are opt-in; enable only while troubleshooting a specific device.
+# Keep device I/O off the hot path. Compact per-request/outcome logging is
+# always written to storage/logs/iclock.log; the flags below add optional
+# verbose DB logging. Enable them while troubleshooting a specific device.
 ICLOCK_DEBUG=false
 ICLOCK_LOG_HANDSHAKES=false
 ICLOCK_LOG_PUNCHES=false
@@ -417,6 +418,10 @@ device registers via the "Devices pending" screen in the admin dashboard.
   - Default seeded super admin: `john.doe@example.com` / `password`
 - Device handshake: check `/var/log/apache2/access.log` for `GET /iclock/cdata`
   entries from the device.
+- Compact device traffic is logged to `/var/www/adms/storage/logs/iclock.log`
+  (events like `ICLOCK REQUEST`, `ICLOCK HEARTBEAT`,
+  `ICLOCK NEW DEVICE DETECTED`, `ICLOCK REJECTED` with the reason). A missing
+  SN is logged as `ICLOCK MISSING SN` / `ICLOCK SKIP DETECTION`.
 - The device shows **online** in the dashboard after a handshake.
 - Confirm the handshake response contains `IsPushComKey=1` and
   `PushComKey=<key>` and that attendance rows appear after the device pushes
@@ -495,6 +500,40 @@ sudo supervisorctl restart adms-queue
   ```bash
   sudo tail -f /var/log/apache2/error.log
   ```
+
+- Device not appearing under **System → New Devices** (super admin): the reason
+  is recorded in `storage/logs/iclock.log`. Each `/iclock/*` request logs a
+  compact line, so `tail` it while the device polls:
+
+  ```bash
+  sudo tail -f /var/www/adms/storage/logs/iclock.log
+  ```
+
+  What to look for:
+
+  - **Nothing at all** → the device is not reaching this server/app. Confirm
+    the device's Server/IP/port (`your-domain.com:8080`), the URL it pushes to,
+    and check `/var/log/apache2/access.log` for `/iclock/` hits from the device
+    (and their HTTP status — 200 vs 301/404). A 404 means routing/`.htaccess`
+    is broken; no hit at all means network/firewall/Cloudflare or the device is
+    talking to a different server.
+  - `ICLOCK MISSING SN` / `ICLOCK SKIP DETECTION` → the device sends no `SN`
+    parameter, so it can never be detected; check the device's push settings.
+  - `ICLOCK REJECTED ... reason=comm_key` → server-side ComKey mismatch; make
+    the device key match what was entered when assigning it in the portal.
+  - `ICLOCK REJECTED ... reason=blocked|company_disabled` → the device or its
+    company is disabled in the portal.
+  - `ICLOCK NEW DEVICE DETECTED` / `ICLOCK NEW DEVICE UPDATED` → detection
+    succeeded and a `pending_devices` row exists. If it still does not show in
+    the portal, filter the **New Devices** page by state (Detected/Assigned/
+    Blocked/Ignored) or check that you are on the right database/environment.
+  - `ICLOCK NEW DEVICE FAILED` → the `pending_devices` insert threw (see the
+    `error` field); investigate the DB error.
+
+  For verbose dumps (full query/headers/body), set `ICLOCK_DEBUG=true` in
+  `.env` and re-cache the config. Setting `ICLOCK_LOG_HANDSHAKES=true` also
+  writes each handshake to the `device_log` table, viewable in the super-admin
+  "Device Logs" page (with an SN filter).
 
 - Device data rejected (`ERROR: 0`):
 
