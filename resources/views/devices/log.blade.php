@@ -51,7 +51,7 @@
                         <td>{{ $d->id }}</td>
                         <td><span class="badge text-bg-light border font-monospace small">{{ $d->sn ?? '-' }}</span></td>
                         <td><span class="font-monospace small">{{ $d->option ?? '-' }}</span></td>
-                        <td class="small">{{ $d->created_at }}</td>
+                        <td class="small">{{ $d->created_at ?? '-' }}</td>
                         <td class="small"><span class="text-break" title="{{ $d->data }}">{{ str($d->data)->limit(120) }}</span></td>
                         <td><span class="font-monospace small text-break">{{ $d->url }}</span></td>
                     </tr>

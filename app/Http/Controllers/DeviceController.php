@@ -257,7 +257,7 @@ class DeviceController extends Controller
         $data['lable'] = 'Finger Log';
         $perPage = 10;
         $data['log'] = DB::table('finger_log')
-            ->select('id', 'data', 'url')
+            ->select('id', 'data', 'url', 'created_at')
             ->orderBy('id', 'DESC')
             ->paginate($perPage);
 
